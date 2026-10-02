@@ -68,9 +68,13 @@ TOOLS = {
     "whatweb":          "whatweb",
     "snmpwalk":         "snmpwalk",
 
-    # Exploitation
+    # Exploitation / Metasploit
     "msfconsole":       "msfconsole",
     "msfvenom":         "msfvenom",
+    "msfdb":            "msfdb",
+    "msf-pattern_create": "msf-pattern_create",
+    "msf-pattern_offset": "msf-pattern_offset",
+    "msf-nasm_shell":   "msf-nasm_shell",
     "sqlmap":           "sqlmap",
     "searchsploit":     "searchsploit",
 
@@ -211,8 +215,9 @@ def check_environment():
 
     # Key tools
     print("TOOLS:")
-    critical = ["nmap", "crackmapexec", "hydra", "sqlmap", "gobuster",
-                 "evil-winrm", "hashcat", "ssh", "proxychains"]
+    critical = ["nmap", "msfconsole", "msfvenom", "searchsploit", "crackmapexec",
+                 "hydra", "sqlmap", "gobuster", "evil-winrm", "hashcat", "ssh",
+                 "proxychains"]
     for t in critical:
         loc = shutil.which(find_tool(t))
         status = f"  {t}: {loc}" if loc else f"  {t}: NOT FOUND"

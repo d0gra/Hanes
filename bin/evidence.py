@@ -163,11 +163,11 @@ def take_screenshot(target_ip, label="", output_dir=None):
     return None, None
 
 
-def capture_command(cmd_str, target_ip, zone="", label="", screenshot=False,
+def capture_command(cmd_str, target_ip, zone="", label="", screenshot=True,
                     remote_method=None, remote_user=None, remote_secret=None,
                     timeout=300):
     """Run a command (locally or on a remote target), capture output as evidence,
-    auto-detect creds/interfaces. For remote: method is ssh/winrm/pth."""
+    auto-detect creds/interfaces. Screenshots are taken by default for every capture."""
     session_dir = _ensure_dirs(target_ip)
     ts = _ts()
     slug = re.sub(r"[^a-z0-9]+", "-", (label or cmd_str.split()[0]).lower()).strip("-")[:40]
@@ -280,7 +280,7 @@ def main():
     cap.add_argument("--ip", required=True, help="Target IP")
     cap.add_argument("--zone", default="", help="Exam zone")
     cap.add_argument("--label", default="", help="Short label for the evidence file")
-    cap.add_argument("--screenshot", action="store_true", help="Also take a screenshot")
+    cap.add_argument("--no-screenshot", action="store_true", help="Skip the auto-screenshot")
     cap.add_argument("--timeout", type=int, default=300, help="Command timeout in seconds")
     add_remote_args(cap)
 
@@ -314,7 +314,8 @@ def main():
 
     if args.action == "capture":
         capture_command(
-            args.cmd, args.ip, args.zone, args.label, args.screenshot,
+            args.cmd, args.ip, args.zone, args.label,
+            screenshot=not args.no_screenshot,
             remote_method=args.remote, remote_user=args.user,
             remote_secret=args.secret, timeout=args.timeout
         )
@@ -332,7 +333,7 @@ def main():
             "vuln": f"{prefix}nmap {scan_flag} --script vuln {'-p ' + args.ports if args.ports else ''} {args.target}",
         }
         cmd = scan_cmds[args.type]
-        capture_command(cmd, args.target, "network-system", f"nmap-{args.type}", screenshot=False)
+        capture_command(cmd, args.target, "network-system", f"nmap-{args.type}")
 
     elif args.action == "proof":
         if args.os == "linux":
@@ -369,7 +370,7 @@ def main():
         for label, cmd in cmds:
             print(f"\n{'='*60}\n[triage:{label}]\n{'='*60}")
             capture_command(
-                cmd, args.ip, "", f"triage-{label}", screenshot=False,
+                cmd, args.ip, "", f"triage-{label}",
                 remote_method=args.remote, remote_user=args.user,
                 remote_secret=args.secret
             )

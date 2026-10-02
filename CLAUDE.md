@@ -29,7 +29,7 @@ On **every** shell you land, immediately run the host-triage block (see `recon-e
 `privilege-escalation` skills): identity, privileges, network interfaces, routes. A missed
 second NIC is a missed range.
 
-## 3. ROI — this wins the exam
+## 3. ROI and parallelism — this wins the exam
 
 - **Breadth over depth.** Partial scores across all five ranges beat a deep dive on one.
   When the operator asks "what now?", rank by points-per-hour, not by what's interesting.
@@ -37,6 +37,14 @@ second NIC is a missed range.
   far more. The moment you find a dual-NIC host, map it and set up the tunnel.
 - Background long-running jobs (scans, cracking, brute-force) and work something else while
   they run. Never `sleep`-wait on them.
+- **Use sub-agents to parallelize.** Spawn Agent workers for independent tasks that can run
+  concurrently:
+  - Scan multiple subnets / targets at the same time.
+  - Run a brute-force / crack in one agent while enumerating in another.
+  - Triage multiple shells simultaneously after a spray lands.
+  - Enumerate web dirs on one host while SMB-enumerating another.
+  Keep the main thread for coordination and decision-making. Each agent should use the
+  evidence engine (`bin/cpent ev`) so all output is captured regardless of which agent ran it.
 
 ## 4. Automated evidence capture — use it by default
 
@@ -84,7 +92,7 @@ Run `/summary` periodically (every 1–2 hours) to catch gaps before they cost p
   chronologically under `engagement/evidence/<session-timestamp>/` for clear segregation
   between runs.
 
-## 7. Workspace commands
+## 8. Workspace commands
 
 `bin/cpent` wraps the Python helpers. Full list:
 
@@ -100,7 +108,7 @@ Run `bin/cpent help` for the full reference.
 When in doubt, keep the operator oriented: say which zone/skill you're in, what step you're
 on, and what the next decision is.
 
-## 7. Style
+## 9. Style
 
 Terse and operational. `file:line` references are clickable. Propose the exact command,
 note what it touches, state the expected signal of success. No model identifiers in any

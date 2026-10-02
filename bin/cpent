@@ -20,11 +20,18 @@ cpent — Hanes CPENT engagement harness
   cpent finding list                 list all findings with severity/zone
   cpent target note <ip>             create/open a per-target note
 
-  AUTOMATION
-  cpent ev <cmd> --ip <ip>           run command, auto-save evidence + detect creds/NICs
-  cpent ev-scan <target> [--type discovery|full|service|vuln]
-  cpent ev-proof --ip <ip> [--os linux|windows]   capture proof-of-access + screenshot
-  cpent screenshot --ip <ip>         take an annotated screenshot (IP + timestamp overlay)
+  AUTOMATION (local or remote)
+  cpent ev <cmd> --ip <ip> [--remote ssh|winrm|pth --user .. --secret ..]
+  cpent ev-scan <target> [--type discovery|full|service|vuln] [--proxychains]
+  cpent ev-proof --ip <ip> [--os linux|windows] [--remote ssh --user .. --secret ..]
+  cpent ev-triage --ip <ip> [--os linux|windows] [--remote ssh --user .. --secret ..]
+  cpent screenshot --ip <ip>         take annotated screenshot (IP + timestamp overlay)
+
+  KALI ENVIRONMENT
+  cpent kali-check                   verify tools, wordlists, VPN, proxychains
+  cpent wordlist [password|directory|username|dns|brute-small|brute-full]
+  cpent vpn                          show VPN/tunnel interface
+  cpent impacket <tool.py>           find the right impacket binary name
 
   DASHBOARD
   cpent next                         ROI prioritizer: what to work on now
@@ -45,7 +52,12 @@ case "$cmd" in
   ev)                             exec python3 "$HERE/evidence.py" capture "$@" ;;
   ev-scan)                        exec python3 "$HERE/evidence.py" scan "$@" ;;
   ev-proof)                       exec python3 "$HERE/evidence.py" proof "$@" ;;
+  ev-triage)                      exec python3 "$HERE/evidence.py" triage "$@" ;;
   screenshot)                     exec python3 "$HERE/evidence.py" screenshot "$@" ;;
+  kali-check|kali)                exec python3 "$HERE/kali.py" check "$@" ;;
+  wordlist)                       exec python3 "$HERE/kali.py" wordlist "$@" ;;
+  vpn)                            exec python3 "$HERE/kali.py" vpn "$@" ;;
+  impacket)                       exec python3 "$HERE/kali.py" impacket "$@" ;;
   summary)                        exec python3 "$HERE/summary.py" generate "$@" ;;
   status)                         exec python3 "$HERE/summary.py" quick "$@" ;;
   start)                          exec python3 "$HERE/summary.py" start-timer "$@" ;;

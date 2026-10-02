@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Auto-evidence capture: runs a command, saves timestamped output, hashes it,
-auto-detects credentials and network interfaces in the output, and optionally
-takes a screenshot. Designed for exam-day automation."""
+"""Auto-evidence capture: runs commands locally or on remote targets (SSH/WinRM),
+saves timestamped output, hashes it, auto-detects credentials and network interfaces
+in the output, and optionally takes a screenshot. Designed for exam-day automation
+on a Kali VM with VPN lab access."""
 import argparse
 import datetime
 import hashlib
@@ -9,6 +10,15 @@ import os
 import re
 import subprocess
 import sys
+
+# Import Kali helpers (same directory)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from kali import run_remote, find_tool, get_vpn_interface
+except ImportError:
+    run_remote = None
+    find_tool = lambda x: x
+    get_vpn_interface = lambda: (None, None)
 
 ENG = os.environ.get("HANES_ENGAGEMENT", "engagement")
 EVIDENCE = os.path.join(ENG, "evidence")
@@ -137,34 +147,54 @@ def take_screenshot(target_ip, label="", output_dir=None):
     return None, None
 
 
-def capture_command(cmd_str, target_ip, zone="", label="", screenshot=False):
-    """Run a command, capture output as evidence, auto-detect creds/interfaces."""
+def capture_command(cmd_str, target_ip, zone="", label="", screenshot=False,
+                    remote_method=None, remote_user=None, remote_secret=None,
+                    timeout=300):
+    """Run a command (locally or on a remote target), capture output as evidence,
+    auto-detect creds/interfaces. For remote: method is ssh/winrm/pth."""
     _ensure_dirs(target_ip)
     ts = _ts()
     slug = re.sub(r"[^a-z0-9]+", "-", (label or cmd_str.split()[0]).lower()).strip("-")[:40]
     evidence_file = os.path.join(ENG, "targets", target_ip, f"{ts}_{slug}.txt")
+
+    exec_mode = f"remote ({remote_method})" if remote_method else "local"
 
     # Header
     header = (f"{'='*72}\n"
               f"TARGET: {target_ip}\n"
               f"TIME:   {_ts_human()}\n"
               f"ZONE:   {zone}\n"
+              f"EXEC:   {exec_mode}\n"
               f"CMD:    {cmd_str}\n"
               f"{'='*72}\n\n")
 
     # Run the command
-    print(f"[evidence] running: {cmd_str}")
-    try:
-        proc = subprocess.run(
-            cmd_str, shell=True, capture_output=True, text=True, timeout=300
+    print(f"[evidence] running ({exec_mode}): {cmd_str}")
+
+    if remote_method and run_remote:
+        # Execute on the remote target
+        stdout, stderr, retcode = run_remote(
+            target_ip, remote_user, remote_secret, cmd_str, method=remote_method
         )
-        output = proc.stdout
-        if proc.stderr:
-            output += f"\n--- STDERR ---\n{proc.stderr}"
-        retcode = proc.returncode
-    except subprocess.TimeoutExpired:
-        output = "(command timed out after 300s)"
+        output = stdout
+        if stderr:
+            output += f"\n--- STDERR ---\n{stderr}"
+    elif remote_method and not run_remote:
+        output = "(remote execution unavailable: kali.py not found)"
         retcode = -1
+    else:
+        # Local execution
+        try:
+            proc = subprocess.run(
+                cmd_str, shell=True, capture_output=True, text=True, timeout=timeout
+            )
+            output = proc.stdout
+            if proc.stderr:
+                output += f"\n--- STDERR ---\n{proc.stderr}"
+            retcode = proc.returncode
+        except subprocess.TimeoutExpired:
+            output = f"(command timed out after {timeout}s)"
+            retcode = -1
 
     # Write evidence file
     with open(evidence_file, "w") as f:
@@ -217,6 +247,13 @@ def main():
     )
     sub = p.add_subparsers(dest="action", required=True)
 
+    # Shared remote-execution args (added to multiple subparsers)
+    def add_remote_args(parser):
+        parser.add_argument("--remote", choices=["ssh", "winrm", "pth"],
+                            help="Execute on the remote target via this method")
+        parser.add_argument("--user", help="Remote username")
+        parser.add_argument("--secret", help="Password or NTLM hash for remote auth")
+
     # capture: run a command and save evidence
     cap = sub.add_parser("capture", help="Run a command and save timestamped evidence")
     cap.add_argument("cmd", help="Command to run (quote it)")
@@ -224,6 +261,8 @@ def main():
     cap.add_argument("--zone", default="", help="Exam zone")
     cap.add_argument("--label", default="", help="Short label for the evidence file")
     cap.add_argument("--screenshot", action="store_true", help="Also take a screenshot")
+    cap.add_argument("--timeout", type=int, default=300, help="Command timeout in seconds")
+    add_remote_args(cap)
 
     # screenshot: just take a screenshot
     scr = sub.add_parser("screenshot", help="Take an annotated screenshot")
@@ -236,37 +275,84 @@ def main():
     scan.add_argument("--type", choices=["discovery", "full", "service", "vuln"],
                        default="service", help="Scan type")
     scan.add_argument("--ports", default="", help="Specific ports")
+    scan.add_argument("--proxychains", action="store_true",
+                       help="Run through proxychains (for pivoted targets)")
 
-    # proof: capture proof-of-access block (whoami + hostname + ip/ifconfig)
+    # proof: capture proof-of-access block on a remote target
     prf = sub.add_parser("proof", help="Run the proof-of-access block and save evidence")
     prf.add_argument("--ip", required=True, help="Target IP")
     prf.add_argument("--os", choices=["linux", "windows"], default="linux")
-    prf.add_argument("--via", default="local", help="How you're connected (ssh/winrm/meterpreter/local)")
+    add_remote_args(prf)
+
+    # triage: full host-triage block (proof + routes + users + privesc check)
+    tri = sub.add_parser("triage", help="Full host-triage on a remote target")
+    tri.add_argument("--ip", required=True, help="Target IP")
+    tri.add_argument("--os", choices=["linux", "windows"], default="linux")
+    add_remote_args(tri)
 
     args = p.parse_args()
 
     if args.action == "capture":
-        capture_command(args.cmd, args.ip, args.zone, args.label, args.screenshot)
+        capture_command(
+            args.cmd, args.ip, args.zone, args.label, args.screenshot,
+            remote_method=args.remote, remote_user=args.user,
+            remote_secret=args.secret, timeout=args.timeout
+        )
 
     elif args.action == "screenshot":
         take_screenshot(args.ip, args.label)
 
     elif args.action == "scan":
+        prefix = "proxychains -q " if args.proxychains else ""
+        scan_flag = "-sT -Pn" if args.proxychains else ""
         scan_cmds = {
-            "discovery": f"nmap -sn {args.target}",
-            "full": f"nmap -p- --min-rate 2000 -T4 {args.target}",
-            "service": f"nmap -sC -sV {'-p ' + args.ports if args.ports else '-p-'} {args.target}",
-            "vuln": f"nmap --script vuln {'-p ' + args.ports if args.ports else ''} {args.target}",
+            "discovery": f"{prefix}nmap -sn {args.target}",
+            "full": f"{prefix}nmap {scan_flag} -p- --min-rate 2000 -T4 {args.target}",
+            "service": f"{prefix}nmap {scan_flag} -sC -sV {'-p ' + args.ports if args.ports else '-p-'} {args.target}",
+            "vuln": f"{prefix}nmap {scan_flag} --script vuln {'-p ' + args.ports if args.ports else ''} {args.target}",
         }
         cmd = scan_cmds[args.type]
         capture_command(cmd, args.target, "network-system", f"nmap-{args.type}", screenshot=False)
 
     elif args.action == "proof":
         if args.os == "linux":
-            cmd = "echo '=== PROOF OF ACCESS ===' && whoami && hostname && id && ip a && ip route && cat /etc/hostname 2>/dev/null"
+            cmd = "echo '=== PROOF OF ACCESS ===' && whoami && hostname && id && ip a && ip route"
         else:
             cmd = 'echo === PROOF OF ACCESS === && whoami && hostname && ipconfig /all'
-        capture_command(cmd, args.ip, "", "proof-of-access", screenshot=True)
+        capture_command(
+            cmd, args.ip, "", "proof-of-access", screenshot=True,
+            remote_method=args.remote, remote_user=args.user,
+            remote_secret=args.secret
+        )
+
+    elif args.action == "triage":
+        # Full host-triage: identity, privs, interfaces, routes, users, local secrets
+        if args.os == "linux":
+            cmds = [
+                ("identity",    "id && whoami && hostname"),
+                ("interfaces",  "ip a && ip route && arp -a"),
+                ("users",       "cat /etc/passwd"),
+                ("privesc",     "sudo -l 2>&1; find / -perm -4000 -type f 2>/dev/null; getcap -r / 2>/dev/null"),
+                ("cron",        "cat /etc/crontab 2>/dev/null; ls -la /etc/cron* 2>/dev/null"),
+                ("kernel",      "uname -a && cat /etc/os-release 2>/dev/null"),
+            ]
+        else:
+            cmds = [
+                ("identity",    "whoami /all"),
+                ("interfaces",  "ipconfig /all && route print && arp -a"),
+                ("users",       "net user && net localgroup administrators"),
+                ("domain",      "net user /domain 2>nul && net group /domain 2>nul"),
+                ("services",    'wmic service get name,pathname,startmode 2>nul | findstr /i "auto"'),
+                ("privesc",     "whoami /priv"),
+            ]
+        print(f"[triage] Full host-triage on {args.ip} ({args.os}) via {args.remote or 'local'}")
+        for label, cmd in cmds:
+            print(f"\n{'='*60}\n[triage:{label}]\n{'='*60}")
+            capture_command(
+                cmd, args.ip, "", f"triage-{label}", screenshot=False,
+                remote_method=args.remote, remote_user=args.user,
+                remote_secret=args.secret
+            )
 
 
 if __name__ == "__main__":

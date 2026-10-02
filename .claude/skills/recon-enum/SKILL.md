@@ -8,17 +8,22 @@ description: Reconnaissance and enumeration playbook for CPENT Range 1 (Network 
 Broadest surface, easiest quick wins, and every shell here is a stepping stone deeper.
 **Always `bin/cpent scope check <ip>` before touching a target.**
 
-## Discovery → scanning (work in order)
+## Discovery → scanning (work in order, use evidence capture)
+
+Use `bin/cpent ev-scan` to auto-save and auto-detect:
 
 ```
-nmap -sn 10.10.10.0/24                              # host discovery across a range
-nmap -p- --min-rate 2000 -T4 <t>                    # full TCP port sweep
-nmap -sC -sV -p <open-ports> <t>                    # service + default scripts on what's open
-nmap --script "smb-vuln-*" -p445 <t>                # targeted vuln scripts
+bin/cpent ev-scan 10.10.10.0/24 --type discovery     # host discovery
+bin/cpent ev-scan <t> --type full                     # full TCP port sweep
+bin/cpent ev-scan <t> --type service --ports 80,445   # service + scripts
+bin/cpent ev-scan <t> --type vuln                     # vuln scripts
+
+# Through a pivot (auto-adds proxychains + -sT -Pn):
+bin/cpent ev-scan <t> --type service --proxychains
 ```
 
-Save every scan under `engagement/targets/<ip>/`. Over a pivot/SOCKS proxy use
-`proxychains nmap -sT -Pn` (SYN scan and host discovery don't traverse SOCKS).
+Output is auto-saved under `engagement/targets/<ip>/` with sha256 hashing.
+Credential patterns and dual-NICs in the output are flagged automatically.
 
 ## Per-service enumeration
 
@@ -31,14 +36,24 @@ Save every scan under `engagement/targets/<ip>/`. Over a pivot/SOCKS proxy use
 
 ## Host-triage block — run on EVERY shell, immediately
 
-Finding a second NIC is finding a whole new range. Log interfaces to the network map.
+The automated triage runs all checks and captures evidence in one shot:
 
 ```
-# Linux
-id; sudo -l; ip a; ip route; arp -a; cat /etc/passwd; uname -a
-# Windows
-whoami /all; ipconfig /all; route print; arp -a; net user; net group /domain
+# Via SSH (with password or key):
+bin/cpent ev-triage --ip <t> --os linux --remote ssh --user <u> --secret '<p>'
+
+# Via WinRM (evil-winrm):
+bin/cpent ev-triage --ip <t> --os windows --remote winrm --user <u> --secret '<p>'
+
+# Via pass-the-hash:
+bin/cpent ev-triage --ip <t> --os windows --remote pth --user <u> --secret '<ntlm>'
+
+# If you already have a local shell on the box:
+bin/cpent ev-triage --ip <t> --os linux
 ```
+
+This runs identity, interfaces, routes, users, privilege checks, and cron/services —
+saves each as a separate evidence file and **auto-detects dual-NICs** (flags pivots).
 
 If a host has two interfaces → it's a pivot. Load the `pivoting` skill now, don't wait.
 
@@ -46,8 +61,11 @@ If a host has two interfaces → it's a pivot. Load the `pivoting` skill now, do
 
 - Always try defaults: `admin/admin`, `admin/password`, product defaults, and **reuse from
   the tracker** (`bin/cpent cred list`) before brute-forcing.
-- Brute-force only when it's the right move: `hydra -L users.txt -P pass.txt <t> <service>`,
-  `crackmapexec smb <t> -u users.txt -p 'Password1'` (spray). Background it and work on.
+- Find the right wordlist: `bin/cpent wordlist password` → `/usr/share/wordlists/rockyou.txt`
+  (or `bin/cpent wordlist brute-small` → `/usr/share/wordlists/fasttrack.txt` for quick runs).
+- Brute-force: `hydra -L users.txt -P $(bin/cpent wordlist brute-small) <t> <service>`
+- Password spray: `crackmapexec smb <t> -u users.txt -p 'Password1'` — background and work on.
+- Before your first scan: `bin/cpent kali-check` to verify all tools and wordlists are present.
 
 ## Hand-off
 

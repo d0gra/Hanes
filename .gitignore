@@ -13,3 +13,8 @@ loot/
 # Python
 __pycache__/
 *.pyc
+
+# Evidence and session state
+engagement/evidence/
+engagement/.session_start
+engagement/summary.md

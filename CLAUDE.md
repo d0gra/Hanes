@@ -29,11 +29,9 @@ On **every** shell you land, immediately run the host-triage block (see `recon-e
 `privilege-escalation` skills): identity, privileges, network interfaces, routes. A missed
 second NIC is a missed range.
 
-## 3. Time-boxing and ROI — this wins the exam
+## 3. ROI — this wins the exam
 
-- **45-minute rule.** If a single target/machine hasn't moved in 45 minutes, say so, record
-  what was tried (partial credit), and recommend moving on. Use `/next`.
-- **Breadth over depth.** Partial scores across all five ranges beat a deep stall on one.
+- **Breadth over depth.** Partial scores across all five ranges beat a deep dive on one.
   When the operator asks "what now?", rank by points-per-hour, not by what's interesting.
 - **Pivoting is critical despite 5% weight** — it unlocks the AD/OT/hidden segments worth
   far more. The moment you find a dual-NIC host, map it and set up the tunnel.

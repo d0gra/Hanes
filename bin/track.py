@@ -288,7 +288,7 @@ def nxt(args):
             print("   NOTE: any dual-NIC host you've popped -> pivot NOW; it gates AD/OT ranges.")
     else:
         print("-> Every zone has a score. Now deepen the highest-value zones and chase DA/root.")
-    print("   Reminder: 45-min stall = document partial credit and move on.")
+    print("   Document partial credit on anything you tried — it counts.")
 
 
 def reset(args):

@@ -12,8 +12,7 @@ attacks *those* problems:
 
 - **Methodology on tap** — one skill per exam zone, each a checklist + command reference
   so you ask Claude "what's the next move here" instead of context-switching to notes.
-- **ROI time-boxing** — `/next` picks your highest points-per-hour target and enforces the
-  45-minute rule.
+- **ROI prioritization** — `/next` picks your highest points-per-hour target.
 - **Relentless bookkeeping** — a credential tracker, per-target notes, and a live network
   map, because password reuse and pivots are where the points hide.
 - **Report-as-you-go** — every finding is logged in a structured form the instant you land
@@ -53,7 +52,7 @@ bin/cpent report > engagement/report-draft.md
 
 | Path | What it is |
 |---|---|
-| `CLAUDE.md` | Operating rules for Claude Code: scope guardrails, methodology, time-boxing |
+| `CLAUDE.md` | Operating rules for Claude Code: scope guardrails, methodology, ROI |
 | `.claude/skills/` | One skill per zone — recon, web, AD, binary, IoT/wireless, privesc, pivoting, evasion, reporting |
 | `.claude/commands/` | Slash commands: `/next`, `/recon`, `/cred`, `/finding`, `/pivot`, `/report` |
 | `engagement/` | Your live workspace — targets, credentials, network map, findings |

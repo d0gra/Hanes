@@ -40,40 +40,59 @@ second NIC is a missed range.
 - Background long-running jobs (scans, cracking, brute-force) and work something else while
   they run. Never `sleep`-wait on them.
 
-## 4. Bookkeeping is not optional
+## 4. Automated evidence capture — use it by default
 
-The report is 5% directly and *gates your ability to claim the other 95%* — you cannot
-re-exploit after time expires, so undocumented points are lost points.
+The report gates 95% of your points, and you cannot re-exploit after time expires. The
+harness automates evidence so nothing slips through. **Use the evidence engine for every
+significant command, not bare shell execution.**
 
+- **Run commands through evidence capture:** `bin/cpent ev "<cmd>" --ip <ip>` instead of
+  running raw. This auto-saves timestamped output, computes sha256, and scans for:
+  - Credentials (user/pass patterns, NTLM hashes, Kerberos tickets) — detected creds are
+    flagged so you can confirm and record them with `bin/cpent cred add`.
+  - Multiple network interfaces (dual-NIC = pivot candidate) — flagged immediately.
+  - Proof-of-access markers (whoami/hostname output).
+- **Scans:** `bin/cpent ev-scan <target> --type discovery|full|service|vuln` — wraps nmap
+  with auto-evidence.
+- **Proof of access:** `bin/cpent ev-proof --ip <ip> --os linux|windows` — runs the
+  whoami/hostname/ip block, saves evidence, and takes an auto-screenshot.
+- **Screenshots:** `bin/cpent screenshot --ip <ip>` — captures the screen with the target
+  IP and timestamp annotated on it. Auto-hashed.
 - **Credentials:** the instant you find any username/password/hash/key, record it:
   `bin/cpent cred add ...`. Password reuse across hosts is rampant — always check the
   tracker before brute-forcing (`bin/cpent cred list`).
 - **Findings:** the instant you get a foothold, flag, or confirmed vuln, write a finding:
-  `bin/cpent finding new ...` (or `/finding`). Capture the command that worked, the output,
-  and the proof (whoami/hostname/ip). Remind the operator to screenshot *before and after*
-  with target IP + timestamp visible — you can't take their screenshots for them.
+  `bin/cpent finding new ...` (or `/finding`).
 - **Network map:** update `engagement/network-map.md` every time you learn a host's
-  interfaces or reach a new segment. Keep the attacker → pivot1 → pivot2 → target chain
-  current.
+  interfaces or reach a new segment.
 
-## 5. Evidence hygiene
+## 5. Live dashboard
+
+- `bin/cpent summary` — full engagement dashboard: zone coverage with progress bars, alerts
+  for untouched zones or low output, credential inventory, next-move recommendation.
+- `bin/cpent status` — one-line status (elapsed time, finding/cred counts).
+- `bin/cpent start` — start the session timer at exam begin.
+- `bin/cpent next` — ROI prioritizer: what to work on now.
+
+Run `/summary` periodically (every 1–2 hours) to catch gaps before they cost points.
+
+## 6. Evidence hygiene
 
 - Prefer non-destructive actions. Before anything that deletes/overwrites on a target,
   describe exactly what it hits and confirm with the operator.
-- CPENT v2 tests file hashing for evidence — when you save a capture/loot file, record its
-  hash (`sha256sum`) in the finding.
-- Keep raw tool output under `engagement/targets/<ip>/` so the report generator can cite it.
+- CPENT v2 tests file hashing for evidence — the evidence engine auto-hashes. For manual
+  captures, record `sha256sum` in the finding.
+- Evidence is saved under `engagement/targets/<ip>/` and `engagement/evidence/`.
 
-## 6. Workspace commands
+## 7. Workspace commands
 
-`bin/cpent` wraps the Python helpers. Key subcommands:
+`bin/cpent` wraps the Python helpers. Full list:
 
-- `scope [add|list|check <ip>]` — manage/verify authorized scope
-- `cred [add|list|find <ip>]` — credential tracker
-- `finding [new|list]` — structured findings
-- `target [note <ip>]` — per-target notes
-- `report` — assemble the EC-Council-style report from findings + creds + map
-- `next` — ROI prioritizer: what to work on now, given the clock and what's unsolved
+**Tracking:** `scope`, `cred`, `finding`, `target note`, `next`, `report`
+**Automation:** `ev`, `ev-scan`, `ev-proof`, `screenshot`
+**Dashboard:** `summary`, `status`, `start`
+
+Run `bin/cpent help` for the full reference.
 
 When in doubt, keep the operator oriented: say which zone/skill you're in, what step you're
 on, and what the next decision is.

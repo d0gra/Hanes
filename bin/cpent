@@ -11,24 +11,30 @@ usage() {
   cat <<'EOF'
 cpent — Hanes CPENT engagement harness
 
+  TRACKING
   cpent scope add <cidr> [label]     record an authorized target range
-  cpent scope list                   list authorized scope
-  cpent scope check <ip>             is this host in scope? (exit 2 if not)
-
+  cpent scope list / check <ip>      list or verify scope
   cpent cred add --ip .. --user .. [--pass ..|--hash ..] --source ..
-  cpent cred list                    show all credentials (check before brute-forcing!)
-  cpent cred find <ip>               look up creds for a host
-
-  cpent finding new --ip .. --zone .. --sev .. --title ".." [--cvss ..] [--cmd ".."]
+  cpent cred list / find <ip>        show or search credentials
+  cpent finding new --ip .. --zone .. --sev .. --title ".."
   cpent finding list                 list all findings with severity/zone
-
   cpent target note <ip>             create/open a per-target note
 
-  cpent next                         ROI prioritizer: what to work on now
-  cpent report                       assemble the report draft to stdout
+  AUTOMATION
+  cpent ev <cmd> --ip <ip>           run command, auto-save evidence + detect creds/NICs
+  cpent ev-scan <target> [--type discovery|full|service|vuln]
+  cpent ev-proof --ip <ip> [--os linux|windows]   capture proof-of-access + screenshot
+  cpent screenshot --ip <ip>         take an annotated screenshot (IP + timestamp overlay)
 
-Zones for --zone: network-system active-directory binary web iot-wireless
-                  defense-evasion privesc pivoting reporting
+  DASHBOARD
+  cpent next                         ROI prioritizer: what to work on now
+  cpent summary                      full engagement dashboard (zone coverage, alerts, creds)
+  cpent status                       one-line status
+  cpent start                        start the session timer (run this at exam start!)
+  cpent report                       assemble the EC-Council report from findings
+
+Zones: network-system active-directory binary web iot-wireless
+       defense-evasion privesc pivoting reporting
 EOF
 }
 
@@ -36,6 +42,13 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   scope|cred|finding|target|next) exec python3 "$HERE/track.py" "$cmd" "$@" ;;
   report)                         exec python3 "$HERE/genreport.py" "$@" ;;
+  ev)                             exec python3 "$HERE/evidence.py" capture "$@" ;;
+  ev-scan)                        exec python3 "$HERE/evidence.py" scan "$@" ;;
+  ev-proof)                       exec python3 "$HERE/evidence.py" proof "$@" ;;
+  screenshot)                     exec python3 "$HERE/evidence.py" screenshot "$@" ;;
+  summary)                        exec python3 "$HERE/summary.py" generate "$@" ;;
+  status)                         exec python3 "$HERE/summary.py" quick "$@" ;;
+  start)                          exec python3 "$HERE/summary.py" start-timer "$@" ;;
   help|-h|--help|"")              usage ;;
   *) echo "unknown command: $cmd" >&2; usage; exit 1 ;;
 esac

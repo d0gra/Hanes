@@ -90,6 +90,10 @@ TOOLS = {
     "evil-winrm":       "evil-winrm",
     "bloodhound-python":"bloodhound-python",
     "certipy":          "certipy",
+    "responder":        "responder",
+    "impacket-ntlmrelayx": "impacket-ntlmrelayx",
+    "bloodyAD":         "bloodyAD",
+    "netexec":          "nxc",
 
     # Web testing
     "ffuf":             "ffuf",

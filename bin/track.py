@@ -50,59 +50,95 @@ def _scope_entries():
     return out
 
 
+def _looks_like_target(s):
+    """Return True if s looks like an IP, CIDR, or IP range — not a keyword."""
+    s = s.strip()
+    if "/" in s:
+        try:
+            ipaddress.ip_network(s, strict=False)
+            return True
+        except ValueError:
+            return False
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", s):
+        try:
+            ipaddress.ip_address(s)
+            return True
+        except ValueError:
+            return False
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}-\d{1,3}$", s):
+        return True
+    return False
+
+
 def _normalize_cidr(cidr):
-    """Bare IP → /32, validate, return normalized string or None."""
+    """Bare IP → /32, IP range → note, CIDR → validated. Returns (network_str, type)."""
+    cidr = cidr.strip()
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}-\d{1,3}$", cidr):
+        return cidr, "range"
     if "/" not in cidr:
         try:
             ipaddress.ip_address(cidr)
-            cidr = cidr + "/32"
+            return cidr + "/32", "host"
         except ValueError:
             pass
     try:
-        ipaddress.ip_network(cidr, strict=False)
-        return cidr
+        net = ipaddress.ip_network(cidr, strict=False)
+        kind = "host" if net.prefixlen == 32 else "subnet"
+        return str(net), kind
     except ValueError as e:
         print(f"skipping invalid: {cidr} ({e})", file=sys.stderr)
-        return None
+        return None, None
 
 
 def scope(args):
     _ensure()
     cidrs = args.cidrs or []
     label = args.label or ""
+    action = args.action
 
-    if args.action == "add":
+    # Auto-detect: if action looks like a target, treat as implicit "add"
+    if action and _looks_like_target(action):
+        cidrs = [action] + cidrs
+        action = "add"
+
+    if action == "add":
         if not cidrs:
-            sys.exit("usage: scope add <cidr> [cidr2 cidr3 ...] [-l label]")
+            sys.exit("usage: scope add <target> [target2 ...] [-l label]\n"
+                     "       scope <ip>  (shortcut — auto-adds)")
+        added = 0
         for raw in cidrs:
-            cidr = _normalize_cidr(raw)
-            if not cidr:
+            net, kind = _normalize_cidr(raw)
+            if not net:
                 continue
             with open(SCOPE, "a") as f:
-                f.write(f"{cidr}\t{label}\n")
-            print(f"scope += {cidr}  {label}")
-    elif args.action == "set":
+                f.write(f"{net}\t{label}\n")
+            print(f"  + {net:<20} ({kind}) {label}")
+            added += 1
+        print(f"scope: {added} target(s) added")
+    elif action == "set":
         if not cidrs:
-            sys.exit("usage: scope set <cidr> [cidr2 cidr3 ...]")
+            sys.exit("usage: scope set <target> [target2 ...]")
         with open(SCOPE, "w") as f:
             for raw in cidrs:
-                cidr = _normalize_cidr(raw)
-                if not cidr:
+                net, kind = _normalize_cidr(raw)
+                if not net:
                     continue
-                f.write(f"{cidr}\t{label}\n")
-                print(f"scope = {cidr}")
+                f.write(f"{net}\t{label}\n")
+                print(f"  = {net:<20} ({kind})")
         print(f"scope replaced ({len(cidrs)} range(s))")
-    elif args.action == "clear":
+    elif action == "clear":
         if os.path.exists(SCOPE):
             os.remove(SCOPE)
         print("scope cleared")
-    elif args.action == "list":
+    elif action == "list":
         entries = _scope_entries()
         if not entries:
-            print("(scope empty — add authorized targets with: cpent scope add <cidr>)")
+            print("(scope empty — just paste IPs: cpent scope 10.10.10.1 172.16.0.0/24)")
+            return
+        print(f"scope: {len(entries)} range(s)")
         for c, l in entries:
-            print(f"{c:<20} {l}")
-    elif args.action == "check":
+            print(f"  {c:<20} {l}")
+    elif action == "check":
         if not cidrs:
             sys.exit("usage: scope check <ip>")
         ip = cidrs[0]
@@ -350,7 +386,8 @@ def main():
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("scope")
-    s.add_argument("action", choices=["add", "set", "list", "check", "clear"])
+    s.add_argument("action", nargs="?", default="list",
+                   help="add|set|list|check|clear, or just paste IPs (auto-adds)")
     s.add_argument("cidrs", nargs="*", help="One or more CIDRs/IPs")
     s.add_argument("--label", "-l", default="", help="Label for the scope entry")
 

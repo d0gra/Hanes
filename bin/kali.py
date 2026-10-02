@@ -91,6 +91,16 @@ TOOLS = {
     "bloodhound-python":"bloodhound-python",
     "certipy":          "certipy",
 
+    # Web testing
+    "ffuf":             "ffuf",
+    "nuclei":           "nuclei",
+    "sslscan":          "sslscan",
+    "testssl":          "testssl.sh",
+    "curl":             "curl",
+    "wfuzz":            "wfuzz",
+    "droopescan":       "droopescan",
+    "joomscan":         "joomscan",
+
     # Password cracking
     "hashcat":          "hashcat",
     "john":             "john",
@@ -216,8 +226,8 @@ def check_environment():
     # Key tools
     print("TOOLS:")
     critical = ["nmap", "msfconsole", "msfvenom", "searchsploit", "crackmapexec",
-                 "hydra", "sqlmap", "gobuster", "evil-winrm", "hashcat", "ssh",
-                 "proxychains"]
+                 "hydra", "sqlmap", "gobuster", "nikto", "ffuf", "nuclei",
+                 "evil-winrm", "hashcat", "ssh", "proxychains"]
     for t in critical:
         loc = shutil.which(find_tool(t))
         status = f"  {t}: {loc}" if loc else f"  {t}: NOT FOUND"

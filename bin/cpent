@@ -12,9 +12,9 @@ usage() {
 cpent — Hanes CPENT engagement harness
 
   TRACKING
-  cpent scope add <cidr> [cidr2 ..] [label]  add target range(s) — bare IPs ok
-  cpent scope set <cidr> [cidr2 ..]          replace entire scope in one shot
-  cpent scope list / check <ip> / clear      list, verify, or wipe scope
+  cpent scope <ip> [ip2 ..] [-l label]       auto-add targets (IPs, CIDRs, ranges)
+  cpent scope add/set/list/check/clear       explicit actions (set replaces all)
+  cpent scope                                list current scope
   cpent cred add --ip .. --user .. [--pass ..|--hash ..] --source ..
   cpent cred list / find <ip>        show or search credentials
   cpent finding new --ip .. --zone .. --sev .. --title ".."

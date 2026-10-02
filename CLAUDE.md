@@ -100,8 +100,9 @@ Run `/summary` periodically (every 1–2 hours) to catch gaps before they cost p
 **Automation:** `ev`, `ev-scan`, `ev-proof`, `screenshot`
 **Dashboard:** `summary`, `status`, `start`
 
-**Scope shortcuts:** `scope add` accepts multiple CIDRs/IPs in one call. `scope set`
-replaces the entire scope. `scope clear` wipes it. Bare IPs (no /prefix) auto-expand to /32.
+**Scope shortcuts:** just `cpent scope 10.10.10.1 172.16.0.0/24` auto-detects and adds.
+No "add" keyword needed. `scope set` replaces all. `scope clear` wipes. `scope` alone lists.
+Bare IPs auto-expand to /32. IP ranges (`10.10.10.1-50`) accepted. Types shown on add.
 
 Run `bin/cpent help` for the full reference.
 

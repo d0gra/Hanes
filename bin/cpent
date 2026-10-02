@@ -28,7 +28,12 @@ cpent — Hanes CPENT engagement harness
   cpent ev-proof --ip <ip> [--os linux|windows] [--remote ssh --user .. --secret ..]
   cpent ev-triage --ip <ip> [--os linux|windows] [--remote ssh --user .. --secret ..]
   cpent ev-jobs                      list background job status (--bg jobs above)
+  cpent commands [tool] [--list]     review/replay the command journal (chain so far)
   cpent spray --user U (--pass P|--hash H) [--proto smb|winrm|ssh|..] [--local-auth] [--bg]
+  cpent msf search <query>                        non-interactive Metasploit search
+  cpent msf run <module> --ip <t> [--lhost auto] [--lport N] [--payload P] [-o K=V] [--proof whoami]
+  cpent msf check <module> --ip <t> [-o K=V]      run only the module's vuln check
+  cpent msf rc <script.rc> --ip <t>               run a resource script
   cpent screenshot --ip <ip>         take annotated screenshot (IP + timestamp overlay)
 
   KALI ENVIRONMENT
@@ -58,7 +63,9 @@ case "$cmd" in
   ev-proof)                       exec python3 "$HERE/evidence.py" proof "$@" ;;
   ev-triage)                      exec python3 "$HERE/evidence.py" triage "$@" ;;
   ev-jobs|jobs)                   exec python3 "$HERE/evidence.py" jobs "$@" ;;
+  commands|cmds)                  exec python3 "$HERE/evidence.py" commands "$@" ;;
   spray)                          exec python3 "$HERE/evidence.py" spray "$@" ;;
+  msf)                            exec python3 "$HERE/evidence.py" msf "$@" ;;
   screenshot)                     exec python3 "$HERE/evidence.py" screenshot "$@" ;;
   kali-check|kali)                exec python3 "$HERE/kali.py" check "$@" ;;
   wordlist)                       exec python3 "$HERE/kali.py" wordlist "$@" ;;

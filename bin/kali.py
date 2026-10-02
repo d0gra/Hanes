@@ -119,6 +119,19 @@ TOOLS = {
     "airodump-ng":      "airodump-ng",
     "aireplay-ng":      "aireplay-ng",
 
+    # IoT / OT / SCADA
+    "binwalk":          "binwalk",
+    "mbtget":           "mbtget",
+    "plcscan":          "plcscan",
+    "onesixtyone":      "onesixtyone",
+
+    # Service enum helpers
+    "ldapsearch":       "ldapsearch",
+    "showmount":        "showmount",
+    "snmpwalk":         "snmpwalk",
+    "snmpset":          "snmpset",
+    "dig":              "dig",
+
     # Binary
     "gdb":              "gdb",
     "ghidra":           "/opt/ghidra*/ghidraRun",

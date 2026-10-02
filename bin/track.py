@@ -339,6 +339,7 @@ def reset(args):
     ]
     # Directories to wipe entirely (evidence has timestamped session subdirs)
     evidence_dir = os.path.join(ENG, "evidence")
+    jobs_dir = os.path.join(ENG, ".jobs")
     td = os.path.join(ENG, "targets")
 
     removed = 0
@@ -353,16 +354,17 @@ def reset(args):
             if os.path.isfile(fp):
                 os.remove(fp)
                 removed += 1
-    # Wipe evidence session folders
-    if os.path.isdir(evidence_dir):
-        for entry in os.listdir(evidence_dir):
-            fp = os.path.join(evidence_dir, entry)
-            if os.path.isdir(fp):
-                shutil.rmtree(fp)
-                removed += 1
-            elif os.path.isfile(fp):
-                os.remove(fp)
-                removed += 1
+    # Wipe evidence session folders and background-job records
+    for wipe_dir in (evidence_dir, jobs_dir):
+        if os.path.isdir(wipe_dir):
+            for entry in os.listdir(wipe_dir):
+                fp = os.path.join(wipe_dir, entry)
+                if os.path.isdir(fp):
+                    shutil.rmtree(fp)
+                    removed += 1
+                elif os.path.isfile(fp):
+                    os.remove(fp)
+                    removed += 1
     # Wipe target subdirs (keep template)
     if os.path.isdir(td):
         for entry in os.listdir(td):

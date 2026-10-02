@@ -23,7 +23,9 @@ posture, and the most significant exposures in plain terms.*
 diagram showing the pivot path (attacker → pivot1 → pivot2 → targets). This is where the
 grader follows your thinking — make the chain explicit.*
 
-_(network diagram — see `engagement/network-map.md`)_
+<!-- NARRATIVE -->
+
+_(network diagram — see `engagement/network-map.md`, reproduced below)_
 
 ## 4. Findings
 
@@ -40,5 +42,9 @@ screenshots, business impact, remediation.*
 ### B. Credential list
 <!-- CREDENTIALS -->
 
-### C. Command log & tool output
-_(reference `engagement/targets/<ip>/`)_
+### C. Per-target notes
+<!-- TARGETNOTES -->
+
+### D. Command log & tool output
+_(full timestamped output + sha256 under `engagement/targets/<ip>/` and
+`engagement/evidence/<session>/`)_

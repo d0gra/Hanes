@@ -7,7 +7,9 @@ is at the keyboard, reviewing and authorizing. This file is your standing orders
 
 - Act **only** against hosts/subnets recorded in scope. Check `engagement/scope.txt`
   (manage it with `bin/cpent scope`). If a target is not in scope, stop and ask the
-  operator to confirm and add it — do not scan or touch it first.
+  operator to confirm and add it — do not scan or touch it first. This is enforced in
+  code: `ev`, `ev-scan`, and `spray` **block** out-of-scope targets and exit non-zero.
+  `--force` overrides for a host the operator confirms is authorized but hasn't added yet.
 - This harness is for the **CPENT licensed range, personal labs, or a signed client
   engagement**. The range is proctored and in-scope by definition; that is the
   authorization. If the operator ever asks you to act outside that context, refuse and say
@@ -36,7 +38,10 @@ second NIC is a missed range.
 - **Pivoting is critical despite 5% weight** — it unlocks the AD/OT/hidden segments worth
   far more. The moment you find a dual-NIC host, map it and set up the tunnel.
 - Background long-running jobs (scans, cracking, brute-force) and work something else while
-  they run. Never `sleep`-wait on them.
+  they run. Never `sleep`-wait on them. Use the built-in job runner:
+  `bin/cpent ev "<cmd>" --ip <ip> --bg` (or `ev-scan ... --bg`, `spray ... --bg`) returns a
+  job id immediately and keeps capturing evidence in the background. Check with
+  `bin/cpent ev-jobs`. A full `-p-` sweep or a hydra run should always be `--bg`.
 - **Use sub-agents to parallelize.** Spawn Agent workers for independent tasks that can run
   concurrently:
   - Scan multiple subnets / targets at the same time.
@@ -66,7 +71,9 @@ significant command, not bare shell execution.**
   IP and timestamp annotated on it. Auto-hashed.
 - **Credentials:** the instant you find any username/password/hash/key, record it:
   `bin/cpent cred add ...`. Password reuse across hosts is rampant — always check the
-  tracker before brute-forcing (`bin/cpent cred list`).
+  tracker before brute-forcing (`bin/cpent cred list`), and **spray every new cred across
+  the whole scope immediately**: `bin/cpent spray --user <u> --pass <p> --proto smb --bg`
+  (or `--hash <ntlm>` for pass-the-hash). This is the highest-ROI move in the exam.
 - **Findings:** the instant you get a foothold, flag, or confirmed vuln, write a finding:
   `bin/cpent finding new ...` (or `/finding`).
 - **Network map:** update `engagement/network-map.md` every time you learn a host's
@@ -97,8 +104,12 @@ Run `/summary` periodically (every 1–2 hours) to catch gaps before they cost p
 `bin/cpent` wraps the Python helpers. Full list:
 
 **Tracking:** `scope`, `cred`, `finding`, `target note`, `next`, `report`, `reset`
-**Automation:** `ev`, `ev-scan`, `ev-proof`, `screenshot`
+**Automation:** `ev`, `ev-scan`, `ev-proof`, `ev-triage`, `ev-jobs`, `spray`, `screenshot`
 **Dashboard:** `summary`, `status`, `start`
+
+**Backgrounding:** add `--bg` to `ev`/`ev-scan`/`spray` to run detached; `ev-jobs` lists
+status. **Scope is enforced in code** on all three — out-of-scope exits non-zero (`--force`
+overrides). **Spray** reads scope and tests one cred against every host in one shot.
 
 **Scope shortcuts:** just `cpent scope 10.10.10.1 172.16.0.0/24` auto-detects and adds.
 No "add" keyword needed. `scope set` replaces all. `scope clear` wipes. `scope` alone lists.

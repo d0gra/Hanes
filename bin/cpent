@@ -22,11 +22,13 @@ cpent — Hanes CPENT engagement harness
   cpent target note <ip>             create/open a per-target note
   cpent reset                        wipe all engagement state for a fresh run
 
-  AUTOMATION (local or remote)
-  cpent ev <cmd> --ip <ip> [--remote ssh|winrm|pth --user .. --secret ..]
-  cpent ev-scan <target> [--type discovery|full|service|vuln] [--proxychains]
+  AUTOMATION (local or remote) — all outward actions are scope-gated (--force to override)
+  cpent ev <cmd> --ip <ip> [--bg] [--remote ssh|winrm|pth --user .. --secret ..]
+  cpent ev-scan <target> [--type discovery|full|service|vuln] [--bg] [--proxychains]
   cpent ev-proof --ip <ip> [--os linux|windows] [--remote ssh --user .. --secret ..]
   cpent ev-triage --ip <ip> [--os linux|windows] [--remote ssh --user .. --secret ..]
+  cpent ev-jobs                      list background job status (--bg jobs above)
+  cpent spray --user U (--pass P|--hash H) [--proto smb|winrm|ssh|..] [--local-auth] [--bg]
   cpent screenshot --ip <ip>         take annotated screenshot (IP + timestamp overlay)
 
   KALI ENVIRONMENT
@@ -55,6 +57,8 @@ case "$cmd" in
   ev-scan)                        exec python3 "$HERE/evidence.py" scan "$@" ;;
   ev-proof)                       exec python3 "$HERE/evidence.py" proof "$@" ;;
   ev-triage)                      exec python3 "$HERE/evidence.py" triage "$@" ;;
+  ev-jobs|jobs)                   exec python3 "$HERE/evidence.py" jobs "$@" ;;
+  spray)                          exec python3 "$HERE/evidence.py" spray "$@" ;;
   screenshot)                     exec python3 "$HERE/evidence.py" screenshot "$@" ;;
   kali-check|kali)                exec python3 "$HERE/kali.py" check "$@" ;;
   wordlist)                       exec python3 "$HERE/kali.py" wordlist "$@" ;;

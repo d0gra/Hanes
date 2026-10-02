@@ -6,6 +6,8 @@ on a Kali VM with VPN lab access."""
 import argparse
 import datetime
 import hashlib
+import ipaddress
+import json
 import os
 import re
 import subprocess
@@ -24,6 +26,88 @@ ENG = os.environ.get("HANES_ENGAGEMENT", "engagement")
 EVIDENCE = os.path.join(ENG, "evidence")
 CREDS_CSV = os.path.join(ENG, "credentials.csv")
 SESSION_FILE = os.path.join(ENG, ".session_start")
+SCOPE_FILE = os.path.join(ENG, "scope.txt")
+JOBS_DIR = os.path.join(ENG, ".jobs")
+
+
+# ---------------------------------------------------------------------------
+# Scope enforcement — the authorization hard-gate, in code (CLAUDE.md §1)
+# ---------------------------------------------------------------------------
+def _scope_networks():
+    """Return list of ipaddress networks currently in scope."""
+    nets = []
+    if not os.path.exists(SCOPE_FILE):
+        return nets
+    with open(SCOPE_FILE) as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            entry = line.split("\t", 1)[0].strip()
+            try:
+                nets.append(ipaddress.ip_network(entry, strict=False))
+            except ValueError:
+                continue
+    return nets
+
+
+def _targets_from(target):
+    """Expand a scan/command target into candidate addresses to scope-check.
+    Handles single IP, CIDR, and dashed ranges (10.0.0.1-50)."""
+    target = target.strip()
+    m = re.match(r"^(\d+\.\d+\.\d+)\.(\d+)-(\d+)$", target)
+    if m:
+        base, lo, hi = m.group(1), int(m.group(2)), int(m.group(3))
+        return [ipaddress.ip_address(f"{base}.{n}") for n in range(lo, hi + 1)]
+    try:
+        net = ipaddress.ip_network(target, strict=False)
+        return [net]
+    except ValueError:
+        try:
+            return [ipaddress.ip_address(target)]
+        except ValueError:
+            return None  # not an IP (hostname) — cannot verify
+
+
+def scope_allows(target):
+    """Return (ok, reason). ok=True if every address in target is in scope."""
+    nets = _scope_networks()
+    if not nets:
+        return False, "scope is empty — add authorized targets first: bin/cpent scope <ip>"
+    items = _targets_from(target)
+    if items is None:
+        return None, f"cannot verify scope for non-IP target '{target}'"
+    for item in items:
+        covered = False
+        for net in nets:
+            if isinstance(item, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
+                if item.version == net.version and item.subnet_of(net):
+                    covered = True
+                    break
+            else:
+                if item in net:
+                    covered = True
+                    break
+        if not covered:
+            return False, f"{item} is NOT in scope"
+    return True, "in scope"
+
+
+def enforce_scope(target, force=False):
+    """Gate an outward-facing action on scope. Exits non-zero if out of scope."""
+    ok, reason = scope_allows(target)
+    if ok:
+        return
+    if ok is None:  # hostname target — warn but allow with a clear note
+        print(f"[scope] WARNING: {reason}. Confirm this host is authorized.", file=sys.stderr)
+        return
+    if force:
+        print(f"[scope] OVERRIDE (--force): {reason}. Operator asserts authorization.",
+              file=sys.stderr)
+        return
+    sys.exit(f"[scope] BLOCKED: {reason}\n"
+             f"        Add it with: bin/cpent scope {target}\n"
+             f"        Or override for an authorized host with: --force")
 
 
 def _ts():
@@ -63,54 +147,108 @@ def _sha256(path):
 
 
 def _detect_creds(text):
-    """Scan output for likely credentials. Returns list of dicts."""
+    """Scan output for high-confidence credential material. Returns list of dicts.
+
+    Deliberately conservative — a bare 32-hex string matches too many benign values
+    (nmap fingerprints, cert thumbprints, cache IDs) and floods the alert, so it is
+    NOT used. Only structured, credential-shaped patterns are flagged."""
     found = []
     patterns = [
-        # user:password or user:hash patterns
-        (r"(?i)(?:user(?:name)?|login)\s*[:=]\s*(\S+)", "user"),
-        (r"(?i)(?:pass(?:word)?|pwd)\s*[:=]\s*(\S+)", "pass"),
-        # NTLM hashes (32 hex chars)
-        (r"\b([a-fA-F0-9]{32})\b", "hash_candidate"),
-        # user:LM:NTLM from secretsdump/hashdump
-        (r"^(\S+?):\d+:([a-fA-F0-9]{32}):([a-fA-F0-9]{32}):::", "hashdump"),
-        # Kerberos ticket hashes ($krb5tgs$ or $krb5asrep$)
-        (r"(\$krb5(?:tgs|asrep)\$\S+)", "kerb_hash"),
+        # user:password where a password keyword is explicitly present
+        (r"(?i)(?:^|\s)(?:pass(?:word)?|pwd|passwd)\s*[:=]\s*(\S+)", "password"),
+        # secretsdump / hashdump:  user:rid:LM:NTLM:::
+        (r"(?m)^(\S+?):\d+:([a-fA-F0-9]{32}):([a-fA-F0-9]{32}):::", "ntlm_hashdump"),
+        # Kerberos roast hashes
+        (r"(\$krb5(?:tgs|asrep)\$[^\s'\"]+)", "kerberos_hash"),
+        # Bare NTLM hash only when prefixed by an NTLM-ish keyword (avoids noise)
+        (r"(?i)(?:ntlm|nt hash|hash)\s*[:=]\s*([a-fA-F0-9]{32})\b", "ntlm_hash"),
+        # Private keys
+        (r"(-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----)", "private_key"),
+        # AWS-style access keys
+        (r"\b(AKIA[0-9A-Z]{16})\b", "aws_key"),
     ]
-    for line in text.splitlines():
-        for pat, kind in patterns:
-            for m in re.finditer(pat, line):
-                found.append({"kind": kind, "match": m.group(0), "line": line.strip()})
+    seen = set()
+    for pat, kind in patterns:
+        for m in re.finditer(pat, text):
+            match = m.group(0).strip()
+            key = (kind, match)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append({"kind": kind, "match": match,
+                          "line": match if "\n" not in match else match.splitlines()[0]})
     return found
 
 
 def _detect_interfaces(text):
-    """Scan for network interfaces / dual-NIC indicators."""
+    """Scan for network interfaces / dual-NIC indicators (IPv4 and IPv6).
+    Loopback and link-local are ignored so they don't fake a second NIC."""
     found = []
-    # Linux: inet X.X.X.X from ip a
-    for m in re.finditer(r"inet\s+(\d+\.\d+\.\d+\.\d+/\d+)", text):
-        found.append(m.group(1))
-    # Windows: IPv4 Address from ipconfig
+    # Linux: inet / inet6 from `ip a`
+    for m in re.finditer(r"inet\s+(\d+\.\d+\.\d+\.\d+)/\d+", text):
+        ip = m.group(1)
+        if not ip.startswith("127."):
+            found.append(ip)
+    for m in re.finditer(r"inet6\s+([0-9a-fA-F:]+)/\d+", text):
+        ip = m.group(1)
+        if not (ip == "::1" or ip.lower().startswith("fe80")):
+            found.append(ip)
+    # Windows: IPv4/IPv6 Address from ipconfig
     for m in re.finditer(r"IPv4 Address[.\s]*:\s*(\d+\.\d+\.\d+\.\d+)", text):
-        found.append(m.group(1))
-    return found
+        if not m.group(1).startswith("127."):
+            found.append(m.group(1))
+    for m in re.finditer(r"IPv6 Address[.\s]*:\s*([0-9a-fA-F:]+)", text):
+        ip = m.group(1)
+        if not (ip == "::1" or ip.lower().startswith("fe80")):
+            found.append(ip)
+    # Dedupe, preserve order
+    seen, uniq = set(), []
+    for ip in found:
+        if ip not in seen:
+            seen.add(ip)
+            uniq.append(ip)
+    return uniq
 
 
 def _detect_proof(text):
-    """Check if output contains proof-of-access markers."""
+    """Extract proof-of-access markers from output, line-accurately."""
     markers = {}
-    # whoami
-    for m in re.finditer(r"(?:^|\n)\s*((?:\S+\\)?\S+)\s*$", text):
-        if any(k in text.lower() for k in ["whoami", "uid=", "root", "system", "admin"]):
-            markers["identity"] = m.group(1).strip()
-            break
-    # hostname
-    for m in re.finditer(r"(?i)(?:hostname|computer\s*name)[:\s]+(\S+)", text):
+    # Linux `id`:  uid=0(root) gid=0(root) ...
+    m = re.search(r"(uid=\d+\([^)]+\)\s+gid=\d+\([^)]+\)[^\n]*)", text)
+    if m:
+        markers["id"] = m.group(1).strip()
+    # Windows whoami:  domain\user  (on its own line, after a whoami invocation)
+    m = re.search(r"(?mi)^((?:[A-Za-z0-9.-]+\\)[A-Za-z0-9$._-]+)\s*$", text)
+    if m:
+        markers["whoami"] = m.group(1).strip()
+    # Generic "nt authority\system" / "root" confirmation
+    if re.search(r"(?i)nt authority\\system", text):
+        markers["privilege"] = "NT AUTHORITY\\SYSTEM"
+    elif re.search(r"(?m)^root$", text) or markers.get("id", "").startswith("uid=0"):
+        markers["privilege"] = "root"
+    # hostname / computer name
+    m = re.search(r"(?i)(?:^|\n)\s*(?:hostname|computer\s*name)[.\s]*:?\s*(\S+)", text)
+    if m:
         markers["hostname"] = m.group(1)
     return markers
 
 
+def _has_display():
+    """True if an X/Wayland display is reachable (screenshots are impossible without one)."""
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def take_screenshot(target_ip, label="", output_dir=None):
-    """Take a screenshot with timestamp and target IP overlay."""
+    """Take a screenshot with timestamp and target IP overlay.
+    Returns (None, None) cleanly on headless hosts — the saved text file remains the
+    primary evidence, and the operator is reminded to screenshot manually."""
+    if not _has_display():
+        print("[screenshot] no display (headless/SSH session) — skipping desktop capture.",
+              file=sys.stderr)
+        print("[screenshot] TEXT evidence is saved and hashed; take a manual screenshot "
+              "(IP + timestamp visible) from the GUI session for the report.", file=sys.stderr)
+        return None, None
+
     ts = _ts()
     session_dir = _session_folder()
     out_dir = output_dir or session_dir
@@ -260,6 +398,149 @@ def capture_command(cmd_str, target_ip, zone="", label="", screenshot=True,
     return evidence_file, sha, output
 
 
+# ---------------------------------------------------------------------------
+# Background job runner — honours CLAUDE.md §3 "background long-running jobs"
+# ---------------------------------------------------------------------------
+def _job_meta_path(jobid):
+    return os.path.join(JOBS_DIR, f"{jobid}.json")
+
+
+def _write_job_meta(jobid, meta):
+    os.makedirs(JOBS_DIR, exist_ok=True)
+    tmp = _job_meta_path(jobid) + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(meta, f, indent=2)
+    os.replace(tmp, _job_meta_path(jobid))
+
+
+def run_in_background(label, target_ip, func, *args, **kwargs):
+    """Fork a detached child to run func(*args). Parent returns a job id immediately.
+    The child records status/exit so `jobs` can report completion. Linux (Kali) only."""
+    os.makedirs(JOBS_DIR, exist_ok=True)
+    jobid = f"{_ts()}_{re.sub(r'[^a-z0-9]+', '-', (label or 'job').lower()).strip('-')[:30]}"
+    logpath = os.path.join(JOBS_DIR, f"{jobid}.log")
+    meta = {"id": jobid, "label": label, "target": target_ip, "status": "running",
+            "started": _ts_human(), "finished": None, "exit": None, "log": logpath}
+    _write_job_meta(jobid, meta)
+
+    try:
+        pid = os.fork()
+    except OSError as e:
+        sys.exit(f"[jobs] cannot fork background job: {e}")
+
+    if pid > 0:
+        meta["pid"] = pid
+        _write_job_meta(jobid, meta)
+        print(f"[jobs] started background job: {jobid} (pid {pid})")
+        print(f"[jobs] watch:  bin/cpent ev-jobs           # list status")
+        print(f"[jobs] output: {logpath}")
+        return jobid
+
+    # --- child ---
+    os.setsid()
+    with open(logpath, "w") as logf:
+        os.dup2(logf.fileno(), sys.stdout.fileno())
+        os.dup2(logf.fileno(), sys.stderr.fileno())
+        rc = 0
+        try:
+            func(*args, **kwargs)
+        except SystemExit as e:
+            rc = e.code if isinstance(e.code, int) else 1
+        except Exception as e:  # noqa: BLE001 — record any failure for the operator
+            print(f"[jobs] job raised: {e}")
+            rc = 1
+        meta["status"] = "done"
+        meta["finished"] = _ts_human()
+        meta["exit"] = rc
+        _write_job_meta(jobid, meta)
+    os._exit(0)
+
+
+def _pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def list_jobs(args):
+    """Print the status of all background jobs."""
+    if not os.path.isdir(JOBS_DIR):
+        print("(no background jobs)")
+        return
+    metas = []
+    for fn in sorted(os.listdir(JOBS_DIR)):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            meta = json.load(open(os.path.join(JOBS_DIR, fn)))
+        except (ValueError, OSError):
+            continue
+        # Reconcile: a "running" job whose pid is gone but never recorded done = crashed
+        if meta.get("status") == "running" and not _pid_alive(meta.get("pid")):
+            meta["status"] = "ended"
+        metas.append(meta)
+    if not metas:
+        print("(no background jobs)")
+        return
+    print(f"{'STATUS':<9} {'JOB':<40} {'TARGET':<16} STARTED")
+    for m in metas:
+        print(f"{m.get('status',''):<9} {m.get('id',''):<40} "
+              f"{m.get('target',''):<16} {m.get('started','')}")
+        if m.get("status") == "done" and m.get("exit") not in (0, None):
+            print(f"          exit={m['exit']}  (see {m.get('log','')})")
+    print("\nTail a job's output:  tail -f <log path above>")
+
+
+# ---------------------------------------------------------------------------
+# Credential spray — the highest-ROI exam move: test one cred against all scope
+# ---------------------------------------------------------------------------
+def _scope_targets_str():
+    """All in-scope entries as a space-joined string for a spray tool."""
+    nets = _scope_networks()
+    out = []
+    for n in nets:
+        # /32 and /128 → bare host; otherwise the CIDR itself (nxc expands it)
+        if n.prefixlen in (32, 128):
+            out.append(str(n.network_address))
+        else:
+            out.append(str(n))
+    return " ".join(out)
+
+
+def run_spray(args):
+    """Spray a single credential across every in-scope host via netexec/crackmapexec."""
+    targets = _scope_targets_str()
+    if not targets:
+        sys.exit("[spray] scope is empty — add authorized targets first: bin/cpent scope <ip>")
+    if not (args.passwd or args.nthash):
+        sys.exit("[spray] need --pass <password> or --hash <ntlm>")
+
+    # Prefer netexec (nxc); fall back to crackmapexec
+    import shutil as _sh
+    tool = "nxc" if _sh.which("nxc") else ("crackmapexec" if _sh.which("crackmapexec") else "nxc")
+
+    user_part = f"-u '{args.user}'"
+    secret_part = f"-H '{args.nthash}'" if args.nthash else f"-p '{args.passwd}'"
+    extra = " --local-auth" if args.local_auth else ""
+    # --continue-on-success so one valid cred doesn't stop the sweep
+    cmd = f"{tool} {args.proto} {targets} {user_part} {secret_part}{extra} --continue-on-success"
+
+    print(f"[spray] {args.proto.upper()} spray of '{args.user}' across scope "
+          f"({len(_scope_networks())} range(s))")
+    print(f"[spray] command: {cmd}")
+    label = f"spray-{args.proto}-{re.sub(r'[^a-z0-9]+', '-', args.user.lower())}"[:40]
+    if args.background:
+        run_in_background(label, "scope", capture_command, cmd, "scope-spray",
+                          "network-system", label, screenshot=False, timeout=1800)
+    else:
+        capture_command(cmd, "scope-spray", "network-system", label,
+                        screenshot=False, timeout=1800)
+
+
 def main():
     p = argparse.ArgumentParser(
         prog="evidence",
@@ -282,7 +563,13 @@ def main():
     cap.add_argument("--label", default="", help="Short label for the evidence file")
     cap.add_argument("--no-screenshot", action="store_true", help="Skip the auto-screenshot")
     cap.add_argument("--timeout", type=int, default=300, help="Command timeout in seconds")
+    cap.add_argument("--background", "--bg", action="store_true",
+                     help="Run detached; returns a job id (use ev-jobs to check)")
+    cap.add_argument("--force", action="store_true", help="Override scope block (authorized host)")
     add_remote_args(cap)
+
+    # jobs: list background job status
+    sub.add_parser("jobs", help="List background job status")
 
     # screenshot: just take a screenshot
     scr = sub.add_parser("screenshot", help="Take an annotated screenshot")
@@ -297,6 +584,23 @@ def main():
     scan.add_argument("--ports", default="", help="Specific ports")
     scan.add_argument("--proxychains", action="store_true",
                        help="Run through proxychains (for pivoted targets)")
+    scan.add_argument("--background", "--bg", action="store_true",
+                      help="Run detached; returns a job id (use ev-jobs to check)")
+    scan.add_argument("--force", action="store_true", help="Override scope block (authorized)")
+    scan.add_argument("--timeout", type=int, default=1800,
+                      help="Scan timeout in seconds (default 1800 — full sweeps are slow)")
+
+    # spray: test a credential across all in-scope hosts
+    spray = sub.add_parser("spray", help="Spray one credential across all in-scope hosts")
+    spray.add_argument("--user", required=True, help="Username (or user list file with @)")
+    spray.add_argument("--pass", dest="passwd", help="Password")
+    spray.add_argument("--hash", dest="nthash", help="NTLM hash (pass-the-hash)")
+    spray.add_argument("--proto", default="smb",
+                       choices=["smb", "winrm", "ssh", "ldap", "rdp", "mssql", "ftp"],
+                       help="Protocol to spray (default smb)")
+    spray.add_argument("--local-auth", action="store_true", help="Local (non-domain) auth")
+    spray.add_argument("--background", "--bg", action="store_true", help="Run detached")
+    spray.add_argument("--force", action="store_true", help="Override scope block")
 
     # proof: capture proof-of-access block on a remote target
     prf = sub.add_parser("proof", help="Run the proof-of-access block and save evidence")
@@ -312,18 +616,31 @@ def main():
 
     args = p.parse_args()
 
+    if args.action == "jobs":
+        list_jobs(args)
+        return
+
     if args.action == "capture":
-        capture_command(
-            args.cmd, args.ip, args.zone, args.label,
-            screenshot=not args.no_screenshot,
-            remote_method=args.remote, remote_user=args.user,
-            remote_secret=args.secret, timeout=args.timeout
-        )
+        enforce_scope(args.ip, force=args.force)
+        if args.background:
+            run_in_background(
+                args.label or "capture", args.ip,
+                capture_command, args.cmd, args.ip, args.zone, args.label,
+                screenshot=not args.no_screenshot,
+                remote_method=args.remote, remote_user=args.user,
+                remote_secret=args.secret, timeout=args.timeout)
+        else:
+            capture_command(
+                args.cmd, args.ip, args.zone, args.label,
+                screenshot=not args.no_screenshot,
+                remote_method=args.remote, remote_user=args.user,
+                remote_secret=args.secret, timeout=args.timeout)
 
     elif args.action == "screenshot":
         take_screenshot(args.ip, args.label)
 
     elif args.action == "scan":
+        enforce_scope(args.target, force=args.force)
         prefix = "proxychains -q " if args.proxychains else ""
         scan_flag = "-sT -Pn" if args.proxychains else ""
         scan_cmds = {
@@ -333,7 +650,17 @@ def main():
             "vuln": f"{prefix}nmap {scan_flag} --script vuln {'-p ' + args.ports if args.ports else ''} {args.target}",
         }
         cmd = scan_cmds[args.type]
-        capture_command(cmd, args.target, "network-system", f"nmap-{args.type}")
+        if args.background:
+            run_in_background(
+                f"nmap-{args.type}", args.target,
+                capture_command, cmd, args.target, "network-system",
+                f"nmap-{args.type}", timeout=args.timeout)
+        else:
+            capture_command(cmd, args.target, "network-system",
+                            f"nmap-{args.type}", timeout=args.timeout)
+
+    elif args.action == "spray":
+        run_spray(args)
 
     elif args.action == "proof":
         if args.os == "linux":

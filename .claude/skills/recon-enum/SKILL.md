@@ -8,19 +8,45 @@ description: Reconnaissance and enumeration playbook for CPENT Range 1 (Network 
 Broadest surface, easiest quick wins, and every shell here is a stepping stone deeper.
 **Always `bin/cpent scope check <ip>` before touching a target.**
 
-## Discovery → scanning (work in order, use evidence capture)
+## Discovery → scanning (parallel strategy, never limit ports)
 
-Use `bin/cpent ev-scan` to auto-save and auto-detect:
+Use `bin/cpent ev-scan` to auto-save and auto-detect. **Always scan all 65535 ports** —
+services on high ports (8080, 8443, 9090, 49152+) are common CPENT targets. Use sub-agents
+to run the fast and deep scans in parallel:
 
+### Phase 1: discover hosts + quick top-ports (parallel)
 ```
-bin/cpent ev-scan 10.10.10.0/24 --type discovery     # host discovery
-bin/cpent ev-scan <t> --type full                     # full TCP port sweep
-bin/cpent ev-scan <t> --type service --ports 80,445   # service + scripts
-bin/cpent ev-scan <t> --type vuln                     # vuln scripts
+# Agent 1: host discovery across the subnet
+bin/cpent ev-scan 10.10.10.0/24 --type discovery
+
+# Agent 2 (per live host): quick service scan on common ports for fast wins
+bin/cpent ev "nmap -sC -sV -T4 --top-ports 1000 <t>" --ip <t>
+```
+
+### Phase 2: full port sweep (background while you work phase 1 results)
+```
+# Agent 3: all 65535 TCP ports — catches high-port services others miss
+bin/cpent ev-scan <t> --type full
+
+# When full scan returns, service-scan any NEW ports not in top-1000:
+bin/cpent ev-scan <t> --type service --ports <new-high-ports>
+```
+
+### Phase 3: targeted follow-up
+```
+# Vuln scripts on interesting ports:
+bin/cpent ev-scan <t> --type vuln --ports <interesting-ports>
+
+# UDP top-20 (slow but SNMP/TFTP/DNS are exam staples):
+bin/cpent ev "nmap -sU --top-ports 20 -T4 <t>" --ip <t>
 
 # Through a pivot (auto-adds proxychains + -sT -Pn):
 bin/cpent ev-scan <t> --type service --proxychains
 ```
+
+**Key rule:** never scan only a handful of ports. The quick scan gives you something to
+work on immediately; the full scan runs in parallel and catches everything. Compare results
+— any port in the full scan not in the quick scan gets a service scan.
 
 Output is auto-saved under `engagement/targets/<ip>/` with sha256 hashing.
 Credential patterns and dual-NICs in the output are flagged automatically.

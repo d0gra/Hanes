@@ -22,13 +22,22 @@ Each finding records:
 - **Remediation** — one line
 - **Evidence** — screenshot filenames + any loot file and its `sha256sum`
 
-## Screenshot rules (operator must do these — you can't)
+## Screenshot rules
 
-- Screenshot **before and after** every exploitation.
-- Every screenshot shows the **target IP and a timestamp**.
-- Flag/proof screenshots show `whoami`, `hostname`, and `ip a`.
-- Capture brute-force hits, cracked hashes, and credential finds.
-- Remind the operator at each finding — lost access = no re-shot evidence.
+**Command-line evidence is auto-captured.** Every `bin/cpent ev`/`ev-scan`/`ev-proof`
+renders the command + its real output into an annotated PNG (target IP + timestamp
+banners, sha256-hashed), saved under `engagement/targets/<ip>/` and the session evidence
+folder. For CLI tools (nmap, whoami, secretsdump, hydra hits, cracked hashes) you do **not**
+need a manual screenshot — run it through the evidence engine and the proof image exists.
+
+**The operator still manually screenshots GUI evidence** (you can't):
+- Browser/Burp views, web-app exploitation, admin panels.
+- RDP/VNC desktop sessions, GUI tools (Immunity, Wireshark, BloodHound).
+- Use `bin/cpent screenshot --ip <ip>` on the GUI session (IP + timestamp overlaid).
+
+Rules for both: every image shows the **target IP and a timestamp**; proof-of-access shows
+`whoami`/`id`, `hostname`, `ip a`; capture before **and** after exploitation. Lost access =
+no re-shot evidence, so capture as you go.
 
 ## EC-Council report structure (see `templates/report-template.md`)
 

@@ -139,7 +139,8 @@ TOOLS = {
 
     # Evidence
     "scrot":            "scrot",
-    "import":           "import",  # ImageMagick
+    "import":           "import",     # ImageMagick (desktop grab)
+    "convert":          "convert",    # ImageMagick (renders tool-output evidence images)
 
     # Remote access
     "xfreerdp":         "xfreerdp",
@@ -253,6 +254,16 @@ def check_environment():
         found = find_impacket(tool_name)
         loc = shutil.which(found)
         print(f"  {tool_name}: {loc or 'NOT FOUND'} (as: {found})")
+    print()
+
+    # Evidence rendering (ImageMagick convert renders tool-output screenshots)
+    print("EVIDENCE:")
+    conv = shutil.which("convert")
+    if conv:
+        print(f"  convert (ImageMagick): {conv}  -> tool-output evidence images OK")
+    else:
+        print("  convert: NOT FOUND  -> install imagemagick for rendered evidence images "
+              "(sudo apt install -y imagemagick); text evidence still saved")
     print()
 
     # Network interfaces

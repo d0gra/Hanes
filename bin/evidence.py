@@ -301,6 +301,106 @@ def take_screenshot(target_ip, label="", output_dir=None):
     return None, None
 
 
+# Fonts to try for the rendered-output image, in order (first that exists wins).
+_MONO_FONTS = [
+    "DejaVu-Sans-Mono", "DejaVuSansMono", "Liberation-Mono",
+    "FreeMono", "Courier-New", "Courier",
+]
+_MAX_IMG_LINES = 80          # cap rendered lines so one scan doesn't make a giant PNG
+_MAX_IMG_COLS = 160          # wrap/truncate very long lines
+
+
+def render_output_image(target_ip, cmd_str, output, label="", output_dir=None):
+    """Render the command and its OUTPUT into an annotated PNG — the evidence screenshot
+    comes from the tool itself (nmap/whoami/etc.), not a desktop grab. Works headless.
+    Needs ImageMagick `convert`; returns (path, sha) or (None, None)."""
+    if not _sh_which("convert"):
+        print("[evidence-img] ImageMagick 'convert' not found — install imagemagick to "
+              "render tool-output screenshots (text evidence is still saved).", file=sys.stderr)
+        return None, None
+
+    ts = _ts()
+    session_dir = _session_folder()
+    out_dir = output_dir or session_dir
+    os.makedirs(out_dir, exist_ok=True)
+    slug = re.sub(r"[^a-z0-9]+", "-", (label or cmd_str.split()[0]).lower()).strip("-")[:40]
+    filepath = os.path.join(out_dir, f"{ts}_{target_ip}_{slug}.png")
+
+    # Build the text block: IP+timestamp banner, the command, then its output.
+    banner = f"=== EVIDENCE  {target_ip}  |  {_ts_human()} ==="
+    lines = [banner, f"$ {cmd_str}", ""]
+    out_lines = output.splitlines()
+    truncated = False
+    if len(out_lines) > _MAX_IMG_LINES:
+        out_lines = out_lines[:_MAX_IMG_LINES]
+        truncated = True
+    for ln in out_lines:
+        lines.append(ln[:_MAX_IMG_COLS] + (" …" if len(ln) > _MAX_IMG_COLS else ""))
+    if truncated:
+        lines.append(f"... [output truncated to {_MAX_IMG_LINES} lines — full text + "
+                     f"sha256 in the evidence .txt] ...")
+    lines += ["", banner]
+    text = "\n".join(lines)
+
+    # Render with an INLINE `label:` (Kali/Debian ImageMagick policy blocks reading text
+    # from @file, so the text is passed directly as the argument).
+    font = next((ft for ft in _MONO_FONTS if _font_available(ft)), None)
+    base = ["convert", "-background", "#0b0e14", "-fill", "#c8d3e0",
+            "-pointsize", "15", "-bordercolor", "#0b0e14", "-border", "16"]
+
+    def _run(with_font):
+        cmd = list(base)
+        if with_font and font:
+            cmd += ["-font", font]
+        cmd += [f"label:{text}", filepath]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=30)
+            return r.returncode == 0 and os.path.exists(filepath)
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            print(f"[evidence-img] render failed: {e}", file=sys.stderr)
+            return False
+
+    if not _run(with_font=True):
+        _run(with_font=False)   # retry with default font if the named one was rejected
+
+    if not os.path.exists(filepath):
+        print("[evidence-img] render produced no file (check ImageMagick policy).",
+              file=sys.stderr)
+        return None, None
+    sha = _sha256(filepath)
+    print(f"SCREENSHOT (tool output): {filepath}")
+    print(f"  sha256: {sha}")
+    return filepath, sha
+
+
+def _sh_which(name):
+    import shutil as _sh
+    return _sh.which(name)
+
+
+_FONT_CACHE = {}
+
+
+def _font_available(font):
+    """Check `convert -list font` once for a font name."""
+    if not _FONT_CACHE:
+        try:
+            out = subprocess.run(["convert", "-list", "font"], capture_output=True,
+                                 text=True, timeout=10).stdout
+            for m in re.finditer(r"Font:\s*(\S+)", out):
+                _FONT_CACHE[m.group(1)] = True
+        except Exception:
+            _FONT_CACHE["__failed__"] = True
+    return font in _FONT_CACHE
+
+
+def _safe_unlink(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def capture_command(cmd_str, target_ip, zone="", label="", screenshot=True,
                     remote_method=None, remote_user=None, remote_secret=None,
                     timeout=300):
@@ -391,9 +491,20 @@ def capture_command(cmd_str, target_ip, zone="", label="", screenshot=True,
     if proof:
         print(f"\n[auto-detect] proof of access: {proof}")
 
-    # Screenshot if requested
+    # Evidence image: render the TOOL'S OWN OUTPUT (nmap/whoami/etc.) into an annotated
+    # PNG — this is the screenshot that proves the result, works headless, and always
+    # contains the actual output. Desktop grabs are reserved for GUI apps via
+    # `bin/cpent screenshot`. Saved to both the session folder and the per-target folder,
+    # mirroring the text evidence.
     if screenshot:
-        take_screenshot(target_ip, label or slug)
+        img_path, _ = render_output_image(target_ip, cmd_str, output, label or slug)
+        if img_path and target_ip not in ("scope-spray",):
+            try:
+                import shutil as _sh
+                _sh.copy2(img_path, os.path.join(ENG, "targets", target_ip,
+                                                  os.path.basename(img_path)))
+            except OSError:
+                pass
 
     return evidence_file, sha, output
 

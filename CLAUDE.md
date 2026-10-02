@@ -63,12 +63,17 @@ significant command, not bare shell execution.**
     flagged so you can confirm and record them with `bin/cpent cred add`.
   - Multiple network interfaces (dual-NIC = pivot candidate) — flagged immediately.
   - Proof-of-access markers (whoami/hostname output).
+  - **Evidence screenshot = the tool's own output.** Every capture renders the command +
+    its actual output (nmap/whoami/etc.) into an annotated PNG (IP + timestamp banners),
+    hashed and saved beside the text. This works headless/over SSH and always contains the
+    real result — no desktop grab needed. `--no-screenshot` to skip.
 - **Scans:** `bin/cpent ev-scan <target> --type discovery|full|service|vuln` — wraps nmap
-  with auto-evidence.
+  with auto-evidence (and the rendered output image).
 - **Proof of access:** `bin/cpent ev-proof --ip <ip> --os linux|windows` — runs the
-  whoami/hostname/ip block, saves evidence, and takes an auto-screenshot.
-- **Screenshots:** `bin/cpent screenshot --ip <ip>` — captures the screen with the target
-  IP and timestamp annotated on it. Auto-hashed.
+  whoami/hostname/ip block, saves evidence, and renders the output image.
+- **GUI screenshots:** `bin/cpent screenshot --ip <ip>` — grabs the actual desktop (for
+  GUI evidence: Burp, a browser, an RDP/VNC session). Needs a display; annotated + hashed.
+  For command-line tools you don't need this — the rendered output image already proves it.
 - **Credentials:** the instant you find any username/password/hash/key, record it:
   `bin/cpent cred add ...`. Password reuse across hosts is rampant — always check the
   tracker before brute-forcing (`bin/cpent cred list`), and **spray every new cred across

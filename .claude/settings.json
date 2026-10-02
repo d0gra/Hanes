@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bin/cpent:*)",
+      "Bash(./bin/cpent:*)",
+      "Bash(python3 bin/track.py:*)",
+      "Bash(python3 bin/genreport.py:*)",
+      "Read",
+      "Grep",
+      "Glob"
+    ],
+    "ask": [
+      "Bash(nmap:*)",
+      "Bash(sqlmap:*)",
+      "Bash(hydra:*)",
+      "Bash(crackmapexec:*)",
+      "Bash(nxc:*)",
+      "Bash(msfvenom:*)",
+      "Bash(msfconsole:*)",
+      "Bash(evil-winrm:*)",
+      "Bash(chisel:*)",
+      "Bash(ssh:*)",
+      "Bash(proxychains:*)"
+    ]
+  },
+  "env": {
+    "HANES_ENGAGEMENT": "engagement"
+  }
+}

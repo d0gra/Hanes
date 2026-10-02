@@ -1,0 +1,15 @@
+# Live engagement data — never commit range contents / creds / loot
+engagement/scope.txt
+engagement/credentials.csv
+engagement/report-draft.md
+engagement/targets/*/
+engagement/findings/*.md
+!engagement/findings/_template.md
+!engagement/targets/_template.md
+*.pcap
+*.cap
+loot/
+
+# Python
+__pycache__/
+*.pyc

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Hanes CPENT harness dispatcher. Run from the repo root.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/.." && pwd)"
+cd "$ROOT"
+export HANES_ENGAGEMENT="${HANES_ENGAGEMENT:-engagement}"
+
+usage() {
+  cat <<'EOF'
+cpent — Hanes CPENT engagement harness
+
+  cpent scope add <cidr> [label]     record an authorized target range
+  cpent scope list                   list authorized scope
+  cpent scope check <ip>             is this host in scope? (exit 2 if not)
+
+  cpent cred add --ip .. --user .. [--pass ..|--hash ..] --source ..
+  cpent cred list                    show all credentials (check before brute-forcing!)
+  cpent cred find <ip>               look up creds for a host
+
+  cpent finding new --ip .. --zone .. --sev .. --title ".." [--cvss ..] [--cmd ".."]
+  cpent finding list                 list all findings with severity/zone
+
+  cpent target note <ip>             create/open a per-target note
+
+  cpent next                         ROI prioritizer: what to work on now
+  cpent report                       assemble the report draft to stdout
+
+Zones for --zone: network-system active-directory binary web iot-wireless
+                  defense-evasion privesc pivoting reporting
+EOF
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  scope|cred|finding|target|next) exec python3 "$HERE/track.py" "$cmd" "$@" ;;
+  report)                         exec python3 "$HERE/genreport.py" "$@" ;;
+  help|-h|--help|"")              usage ;;
+  *) echo "unknown command: $cmd" >&2; usage; exit 1 ;;
+esac

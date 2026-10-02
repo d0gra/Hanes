@@ -28,6 +28,7 @@ CREDS_CSV = os.path.join(ENG, "credentials.csv")
 SESSION_FILE = os.path.join(ENG, ".session_start")
 SCOPE_FILE = os.path.join(ENG, "scope.txt")
 JOBS_DIR = os.path.join(ENG, ".jobs")
+COMMANDS_DIR = os.path.join(EVIDENCE, "commands")
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +402,70 @@ def _safe_unlink(path):
         pass
 
 
+# ---------------------------------------------------------------------------
+# Command journal — a running, per-tool log of the CLI commands used in the
+# engagement, built under engagement/evidence/commands/ as progress is made.
+# Feeds the report's "Command log" appendix and lets the operator re-run the chain.
+# ---------------------------------------------------------------------------
+_TOOL_PREFIXES = {"sudo", "proxychains", "proxychains4", "-q", "time", "nohup", "stdbuf"}
+
+
+def _tool_name(cmd_str):
+    """Best-effort extraction of the primary tool from a command string."""
+    toks = cmd_str.strip().split()
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if "=" in t and not t.startswith("-") and "/" not in t.split("=")[0]:
+            i += 1              # skip leading VAR=value env assignments
+            continue
+        if t in _TOOL_PREFIXES:
+            i += 1              # skip wrappers (sudo, proxychains, -q, ...)
+            continue
+        break
+    if i >= len(toks):
+        return "misc"
+    tool = os.path.basename(toks[i])
+    # sanitise for a filename
+    tool = re.sub(r"[^A-Za-z0-9._-]", "", tool) or "misc"
+    return tool.lower()
+
+
+def _log_command(cmd_str, target_ip, zone, retcode):
+    """Append a command to the chronological timeline and its per-tool file."""
+    try:
+        os.makedirs(COMMANDS_DIR, exist_ok=True)
+        ts = _ts_human()
+        status = "ok" if retcode in (0, None) else f"exit={retcode}"
+        tool = _tool_name(cmd_str)
+
+        # 1) chronological timeline — every command, in order
+        timeline = os.path.join(COMMANDS_DIR, "_timeline.md")
+        new = not os.path.exists(timeline)
+        with open(timeline, "a") as f:
+            if new:
+                f.write("# Command timeline\n\n"
+                        "Every command run through the evidence engine, in order.\n\n")
+            f.write(f"- `{ts}` [{zone or '-'}] **{target_ip}** ({status}) — `{cmd_str}`\n")
+
+        # 2) per-tool file — distinct commands for that tool (deduped)
+        tool_file = os.path.join(COMMANDS_DIR, f"{tool}.md")
+        existing = ""
+        if os.path.exists(tool_file):
+            with open(tool_file) as f:
+                existing = f.read()
+        else:
+            existing = f"# {tool} — commands used\n\n"
+            with open(tool_file, "w") as f:
+                f.write(existing)
+        # dedupe on the exact command string (same string = same command)
+        if f"`{cmd_str}`" not in existing:
+            with open(tool_file, "a") as f:
+                f.write(f"- `{ts}` **{target_ip}** ({status}) — `{cmd_str}`\n")
+    except OSError:
+        pass  # journaling must never break a capture
+
+
 def capture_command(cmd_str, target_ip, zone="", label="", screenshot=True,
                     remote_method=None, remote_user=None, remote_secret=None,
                     timeout=300):
@@ -464,6 +529,9 @@ def capture_command(cmd_str, target_ip, zone="", label="", screenshot=True,
     print(f"[evidence] saved: {evidence_file}")
     print(f"[evidence] session: {session_copy}")
     print(f"[evidence] sha256: {sha}")
+
+    # Append to the running command journal (per-tool + chronological timeline)
+    _log_command(cmd_str, target_ip, zone, retcode)
 
     # Print the actual output so the operator sees it
     print(f"\n{output}")

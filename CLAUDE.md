@@ -103,6 +103,11 @@ Run `/summary` periodically (every 1–2 hours) to catch gaps before they cost p
 - Evidence is saved in two places: per-target under `engagement/targets/<ip>/` and
   chronologically under `engagement/evidence/<session-timestamp>/` for clear segregation
   between runs.
+- **Command journal:** every command run through the evidence engine is logged under
+  `engagement/evidence/commands/` — `_timeline.md` (chronological, every run with
+  target/zone/exit) plus a per-tool file (`nmap.md`, `crackmapexec.md`, …) of the distinct
+  commands used. It builds itself as you progress and feeds the report's command-log
+  appendix (`bin/cpent report`). No manual upkeep — just run commands through `bin/cpent ev`.
 
 ## 8. Workspace commands
 

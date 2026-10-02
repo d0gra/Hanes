@@ -45,6 +45,9 @@ screenshots, business impact, remediation.*
 ### C. Per-target notes
 <!-- TARGETNOTES -->
 
-### D. Command log & tool output
-_(full timestamped output + sha256 under `engagement/targets/<ip>/` and
-`engagement/evidence/<session>/`)_
+### D. Command log
+_(auto-built from the evidence engine; per-tool breakdown under
+`engagement/evidence/commands/`. Full timestamped output + sha256 under
+`engagement/targets/<ip>/` and `engagement/evidence/<session>/`.)_
+
+<!-- COMMANDLOG -->

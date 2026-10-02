@@ -15,6 +15,7 @@ CREDS = os.path.join(ENG, "credentials.csv")
 MAP = os.path.join(ENG, "network-map.md")
 EVIDENCE = os.path.join(ENG, "evidence")
 TARGETS = os.path.join(ENG, "targets")
+COMMANDS = os.path.join(EVIDENCE, "commands")
 TMPL = os.path.join("templates", "report-template.md")
 
 REQUIRED = ["severity", "target"]
@@ -125,6 +126,21 @@ def read_target_notes():
     return "\n\n".join(blocks) if blocks else "_(no per-target notes)_"
 
 
+def read_command_log():
+    """Embed the chronological command timeline from the evidence journal."""
+    timeline = os.path.join(COMMANDS, "_timeline.md")
+    if not os.path.exists(timeline):
+        return "_(no commands journaled yet — run commands through `bin/cpent ev`)_"
+    body = open(timeline).read().strip()
+    # drop the file's own H1 so it nests under the appendix heading
+    body = re.sub(r"^#\s+.*\n", "", body, count=1).strip()
+    tools = sorted(f[:-3] for f in os.listdir(COMMANDS)
+                   if f.endswith(".md") and not f.startswith("_"))
+    note = (f"\n\n_Per-tool command files: {', '.join(tools)} "
+            f"(under `engagement/evidence/commands/`)._" if tools else "")
+    return body + note
+
+
 def read_creds():
     if not os.path.exists(CREDS):
         return "_(no credentials logged)_"
@@ -160,6 +176,7 @@ def main():
            .replace("<!-- NARRATIVE -->", build_narrative())
            .replace("<!-- NETWORKMAP -->", read_map())
            .replace("<!-- TARGETNOTES -->", read_target_notes())
+           .replace("<!-- COMMANDLOG -->", read_command_log())
            .replace("<!-- CREDENTIALS -->", read_creds()))
     print(out)
 

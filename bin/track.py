@@ -50,27 +50,66 @@ def _scope_entries():
     return out
 
 
+def _normalize_cidr(cidr):
+    """Bare IP → /32, validate, return normalized string or None."""
+    if "/" not in cidr:
+        try:
+            ipaddress.ip_address(cidr)
+            cidr = cidr + "/32"
+        except ValueError:
+            pass
+    try:
+        ipaddress.ip_network(cidr, strict=False)
+        return cidr
+    except ValueError as e:
+        print(f"skipping invalid: {cidr} ({e})", file=sys.stderr)
+        return None
+
+
 def scope(args):
     _ensure()
+    cidrs = args.cidrs or []
+    label = args.label or ""
+
     if args.action == "add":
-        try:
-            ipaddress.ip_network(args.cidr, strict=False)
-        except ValueError as e:
-            sys.exit(f"not a valid IP/CIDR: {args.cidr} ({e})")
-        with open(SCOPE, "a") as f:
-            f.write(f"{args.cidr}\t{args.label or ''}\n")
-        print(f"scope += {args.cidr}  {args.label or ''}")
+        if not cidrs:
+            sys.exit("usage: scope add <cidr> [cidr2 cidr3 ...] [-l label]")
+        for raw in cidrs:
+            cidr = _normalize_cidr(raw)
+            if not cidr:
+                continue
+            with open(SCOPE, "a") as f:
+                f.write(f"{cidr}\t{label}\n")
+            print(f"scope += {cidr}  {label}")
+    elif args.action == "set":
+        if not cidrs:
+            sys.exit("usage: scope set <cidr> [cidr2 cidr3 ...]")
+        with open(SCOPE, "w") as f:
+            for raw in cidrs:
+                cidr = _normalize_cidr(raw)
+                if not cidr:
+                    continue
+                f.write(f"{cidr}\t{label}\n")
+                print(f"scope = {cidr}")
+        print(f"scope replaced ({len(cidrs)} range(s))")
+    elif args.action == "clear":
+        if os.path.exists(SCOPE):
+            os.remove(SCOPE)
+        print("scope cleared")
     elif args.action == "list":
         entries = _scope_entries()
         if not entries:
-            print("(scope empty — add authorized targets with: cpent scope add <cidr> <label>)")
+            print("(scope empty — add authorized targets with: cpent scope add <cidr>)")
         for c, l in entries:
             print(f"{c:<20} {l}")
     elif args.action == "check":
-        if _in_scope(args.cidr):
-            print(f"IN SCOPE: {args.cidr}")
+        if not cidrs:
+            sys.exit("usage: scope check <ip>")
+        ip = cidrs[0]
+        if _in_scope(ip):
+            print(f"IN SCOPE: {ip}")
         else:
-            print(f"NOT IN SCOPE: {args.cidr}  -- do not touch until the operator adds it")
+            print(f"NOT IN SCOPE: {ip}  -- do not touch until the operator adds it")
             sys.exit(2)
 
 
@@ -252,12 +291,68 @@ def nxt(args):
     print("   Reminder: 45-min stall = document partial credit and move on.")
 
 
+def reset(args):
+    """Wipe all engagement state for a fresh start."""
+    import shutil
+    targets = [
+        SCOPE,
+        CREDS,
+        os.path.join(ENG, ".session_start"),
+        os.path.join(ENG, "summary.md"),
+        os.path.join(ENG, "report-draft.md"),
+    ]
+    # Directories to wipe entirely (evidence has timestamped session subdirs)
+    evidence_dir = os.path.join(ENG, "evidence")
+    td = os.path.join(ENG, "targets")
+
+    removed = 0
+    for f in targets:
+        if os.path.exists(f):
+            os.remove(f)
+            removed += 1
+    # Wipe findings
+    if os.path.isdir(FINDINGS):
+        for fn in os.listdir(FINDINGS):
+            fp = os.path.join(FINDINGS, fn)
+            if os.path.isfile(fp):
+                os.remove(fp)
+                removed += 1
+    # Wipe evidence session folders
+    if os.path.isdir(evidence_dir):
+        for entry in os.listdir(evidence_dir):
+            fp = os.path.join(evidence_dir, entry)
+            if os.path.isdir(fp):
+                shutil.rmtree(fp)
+                removed += 1
+            elif os.path.isfile(fp):
+                os.remove(fp)
+                removed += 1
+    # Wipe target subdirs (keep template)
+    if os.path.isdir(td):
+        for entry in os.listdir(td):
+            fp = os.path.join(td, entry)
+            if entry.startswith("_"):
+                continue
+            if os.path.isdir(fp):
+                shutil.rmtree(fp)
+                removed += 1
+            elif os.path.isfile(fp):
+                os.remove(fp)
+                removed += 1
+
+    _ensure()
+    print(f"engagement reset — removed {removed} item(s)")
+    print("ready for a fresh run. next: bin/cpent scope add <cidr> [label]")
+
+
 def main():
     p = argparse.ArgumentParser(prog="track.py")
     sub = p.add_subparsers(dest="command", required=True)
 
-    s = sub.add_parser("scope"); s.add_argument("action", choices=["add", "list", "check"])
-    s.add_argument("cidr", nargs="?"); s.add_argument("label", nargs="?")
+    s = sub.add_parser("scope")
+    s.add_argument("action", choices=["add", "set", "list", "check", "clear"])
+    s.add_argument("cidrs", nargs="*", help="One or more CIDRs/IPs")
+    s.add_argument("--label", "-l", default="", help="Label for the scope entry")
 
     c = sub.add_parser("cred"); c.add_argument("action", choices=["add", "list", "find"])
     c.add_argument("--ip"); c.add_argument("--user"); c.add_argument("--pass", dest="pass")
@@ -271,11 +366,10 @@ def main():
     t = sub.add_parser("target"); t.add_argument("action", choices=["note"]); t.add_argument("ip")
 
     sub.add_parser("next")
+    sub.add_parser("reset")
 
     args = p.parse_args()
     if args.command == "scope":
-        if args.action in ("add", "check") and not args.cidr:
-            sys.exit("usage: scope add|check <cidr> [label]")
         scope(args)
     elif args.command == "cred":
         if args.action == "find" and not args.ip:
@@ -287,6 +381,8 @@ def main():
         target(args)
     elif args.command == "next":
         nxt(args)
+    elif args.command == "reset":
+        reset(args)
 
 
 if __name__ == "__main__":

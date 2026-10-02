@@ -23,6 +23,7 @@ except ImportError:
 ENG = os.environ.get("HANES_ENGAGEMENT", "engagement")
 EVIDENCE = os.path.join(ENG, "evidence")
 CREDS_CSV = os.path.join(ENG, "credentials.csv")
+SESSION_FILE = os.path.join(ENG, ".session_start")
 
 
 def _ts():
@@ -33,10 +34,24 @@ def _ts_human():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _session_folder():
+    """Return the current session's evidence folder (named by session start time).
+    Falls back to a timestamped folder if no session is active."""
+    if os.path.exists(SESSION_FILE):
+        with open(SESSION_FILE) as f:
+            start = f.read().strip()
+        folder_name = start.replace(":", "-").replace("T", "_")[:19]
+    else:
+        folder_name = _ts()
+    return os.path.join(EVIDENCE, folder_name)
+
+
 def _ensure_dirs(ip=None):
-    os.makedirs(EVIDENCE, exist_ok=True)
+    session_dir = _session_folder()
+    os.makedirs(session_dir, exist_ok=True)
     if ip:
         os.makedirs(os.path.join(ENG, "targets", ip), exist_ok=True)
+    return session_dir
 
 
 def _sha256(path):
@@ -97,7 +112,8 @@ def _detect_proof(text):
 def take_screenshot(target_ip, label="", output_dir=None):
     """Take a screenshot with timestamp and target IP overlay."""
     ts = _ts()
-    out_dir = output_dir or EVIDENCE
+    session_dir = _session_folder()
+    out_dir = output_dir or session_dir
     os.makedirs(out_dir, exist_ok=True)
     slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") if label else "screen"
     filename = f"{ts}_{target_ip}_{slug}.png"
@@ -152,10 +168,11 @@ def capture_command(cmd_str, target_ip, zone="", label="", screenshot=False,
                     timeout=300):
     """Run a command (locally or on a remote target), capture output as evidence,
     auto-detect creds/interfaces. For remote: method is ssh/winrm/pth."""
-    _ensure_dirs(target_ip)
+    session_dir = _ensure_dirs(target_ip)
     ts = _ts()
     slug = re.sub(r"[^a-z0-9]+", "-", (label or cmd_str.split()[0]).lower()).strip("-")[:40]
     evidence_file = os.path.join(ENG, "targets", target_ip, f"{ts}_{slug}.txt")
+    session_copy = os.path.join(session_dir, f"{ts}_{target_ip}_{slug}.txt")
 
     exec_mode = f"remote ({remote_method})" if remote_method else "local"
 
@@ -196,15 +213,18 @@ def capture_command(cmd_str, target_ip, zone="", label="", screenshot=False,
             output = f"(command timed out after {timeout}s)"
             retcode = -1
 
-    # Write evidence file
+    # Write evidence file (per-target)
+    content = header + output + f"\n\n{'='*72}\nEXIT CODE: {retcode}\n"
     with open(evidence_file, "w") as f:
-        f.write(header)
-        f.write(output)
-        f.write(f"\n\n{'='*72}\n")
-        f.write(f"EXIT CODE: {retcode}\n")
+        f.write(content)
+
+    # Also write to session-level evidence folder for chronological view
+    with open(session_copy, "w") as f:
+        f.write(content)
 
     sha = _sha256(evidence_file)
     print(f"[evidence] saved: {evidence_file}")
+    print(f"[evidence] session: {session_copy}")
     print(f"[evidence] sha256: {sha}")
 
     # Print the actual output so the operator sees it

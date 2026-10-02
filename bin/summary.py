@@ -72,7 +72,10 @@ def _elapsed():
 def _evidence_count():
     if not os.path.isdir(EVIDENCE):
         return 0
-    return len([f for f in os.listdir(EVIDENCE) if os.path.isfile(os.path.join(EVIDENCE, f))])
+    count = 0
+    for root, dirs, files in os.walk(EVIDENCE):
+        count += len(files)
+    return count
 
 
 def _target_dirs():

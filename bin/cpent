@@ -12,13 +12,15 @@ usage() {
 cpent — Hanes CPENT engagement harness
 
   TRACKING
-  cpent scope add <cidr> [label]     record an authorized target range
-  cpent scope list / check <ip>      list or verify scope
+  cpent scope add <cidr> [cidr2 ..] [label]  add target range(s) — bare IPs ok
+  cpent scope set <cidr> [cidr2 ..]          replace entire scope in one shot
+  cpent scope list / check <ip> / clear      list, verify, or wipe scope
   cpent cred add --ip .. --user .. [--pass ..|--hash ..] --source ..
   cpent cred list / find <ip>        show or search credentials
   cpent finding new --ip .. --zone .. --sev .. --title ".."
   cpent finding list                 list all findings with severity/zone
   cpent target note <ip>             create/open a per-target note
+  cpent reset                        wipe all engagement state for a fresh run
 
   AUTOMATION (local or remote)
   cpent ev <cmd> --ip <ip> [--remote ssh|winrm|pth --user .. --secret ..]
@@ -47,7 +49,7 @@ EOF
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  scope|cred|finding|target|next) exec python3 "$HERE/track.py" "$cmd" "$@" ;;
+  scope|cred|finding|target|next|reset) exec python3 "$HERE/track.py" "$cmd" "$@" ;;
   report)                         exec python3 "$HERE/genreport.py" "$@" ;;
   ev)                             exec python3 "$HERE/evidence.py" capture "$@" ;;
   ev-scan)                        exec python3 "$HERE/evidence.py" scan "$@" ;;

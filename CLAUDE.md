@@ -82,15 +82,20 @@ Run `/summary` periodically (every 1–2 hours) to catch gaps before they cost p
   describe exactly what it hits and confirm with the operator.
 - CPENT v2 tests file hashing for evidence — the evidence engine auto-hashes. For manual
   captures, record `sha256sum` in the finding.
-- Evidence is saved under `engagement/targets/<ip>/` and `engagement/evidence/`.
+- Evidence is saved in two places: per-target under `engagement/targets/<ip>/` and
+  chronologically under `engagement/evidence/<session-timestamp>/` for clear segregation
+  between runs.
 
 ## 7. Workspace commands
 
 `bin/cpent` wraps the Python helpers. Full list:
 
-**Tracking:** `scope`, `cred`, `finding`, `target note`, `next`, `report`
+**Tracking:** `scope`, `cred`, `finding`, `target note`, `next`, `report`, `reset`
 **Automation:** `ev`, `ev-scan`, `ev-proof`, `screenshot`
 **Dashboard:** `summary`, `status`, `start`
+
+**Scope shortcuts:** `scope add` accepts multiple CIDRs/IPs in one call. `scope set`
+replaces the entire scope. `scope clear` wipes it. Bare IPs (no /prefix) auto-expand to /32.
 
 Run `bin/cpent help` for the full reference.
 

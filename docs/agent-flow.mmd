@@ -1,0 +1,58 @@
+%% Hanes CPENT harness — agent flow
+flowchart TD
+    OP["Operator<br/>(human authorizes)"] -->|"/start"| START["cpent start<br/>timer + scope setup"]
+    START --> SCOPE["cpent scope &lt;ip/cidr&gt;<br/>authorized targets"]
+
+    SCOPE --> NEXT{"cpent next<br/>ROI: what now?"}
+
+    NEXT -->|"untouched zone<br/>/ quick win"| LOADSKILL["Load matching skill<br/>recon · web · AD · binary<br/>iot · privesc · pivot · evasion"]
+
+    LOADSKILL --> GATE{"Scope gate<br/>(enforced in code)"}
+    GATE -->|"out of scope"| STOP["BLOCKED<br/>exit non-zero<br/>(--force to override)"]
+    STOP --> NEXT
+    GATE -->|"in scope"| ACT
+
+    subgraph ACT["Action (via evidence engine)"]
+        direction TB
+        RECON["ev-scan --bg<br/>discovery + full -p- parallel"]
+        ENUM["ev per-service enum<br/>SMB/web/LDAP/SNMP/NFS"]
+        EXPLOIT["cpent msf run/check<br/>non-interactive exploit"]
+        SPRAY["cpent spray<br/>cred reuse across scope"]
+        RECON --> ENUM --> EXPLOIT
+    end
+
+    ACT --> EVID[["Evidence engine<br/>auto: text + sha256<br/>+ rendered PNG<br/>+ command journal"]]
+
+    EVID --> DETECT{"Auto-detect"}
+    DETECT -->|"credentials"| CRED["cred add<br/>→ spray"]
+    CRED --> SPRAY
+    SPRAY --> EVID
+    DETECT -->|"dual-NIC"| PIVOTFLAG["PIVOT candidate"]
+    DETECT -->|"proof of access"| FOOTHOLD["Foothold"]
+
+    FOOTHOLD --> TRIAGE["ev-triage<br/>id · privs · routes · NICs"]
+    TRIAGE --> PRIVESC["privilege-escalation<br/>→ root / SYSTEM"]
+    PRIVESC --> FINDING["cpent finding new"]
+
+    PIVOTFLAG --> PIVOT["pivoting skill<br/>ligolo/chisel/SSH<br/>+ update network-map"]
+    PIVOT -->|"new segment reached"| SCOPE
+
+    FINDING --> MAP["update network-map.md"]
+    MAP --> NEXT
+
+    NEXT -->|"all zones covered<br/>/ time to write up"| REPORT["cpent report<br/>gates 95% of points"]
+    REPORT --> CHECK{"Report gaps?<br/>screenshots · CVSS<br/>narrative · diagram"}
+    CHECK -->|"gaps"| NEXT
+    CHECK -->|"complete"| DONE(["EC-Council report<br/>ready to submit"])
+
+    SUB["Sub-agents<br/>(parallel workers)"] -.->|"scan/crack/enum<br/>concurrently"| ACT
+    SUB -.->|"all output via<br/>bin/cpent ev"| EVID
+
+    classDef gate fill:#3a1f1f,stroke:#e06c6c,color:#f0d0d0;
+    classDef engine fill:#13263b,stroke:#4a90d9,color:#cfe0f0;
+    classDef done fill:#15301d,stroke:#4caf7d,color:#cde8d6;
+    classDef loop fill:#2a2440,stroke:#9a7fd0,color:#e0d6f0;
+    class GATE,STOP gate;
+    class EVID,DETECT engine;
+    class DONE done;
+    class NEXT,SUB loop;
